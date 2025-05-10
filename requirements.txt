@@ -1,0 +1,9 @@
+pandas>=1.5.0
+python-dateutil>=2.8.2
+ttkbootstrap>=1.0.0
+matplotlib>=3.7.1
+seaborn>=0.12.0
+pillow>=9.5.0
+openpyxl>=3.0.0  # 用于Excel导出
+plotly>=5.13.0
+numpy>=1.24.0
