@@ -7,3 +7,6 @@ pillow>=9.5.0
 openpyxl>=3.0.0  # 用于Excel导出
 plotly>=5.13.0
 numpy>=1.24.0
+requests>=2.28.0  # 用于下载更新
+packaging>=21.3  # 用于版本比较
+psutil>=5.9.0  # 用于进程管理

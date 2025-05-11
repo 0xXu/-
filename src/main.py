@@ -16,11 +16,15 @@ import matplotlib
 matplotlib.use('TkAgg')
 import seaborn as sns
 import re
+import argparse
+import os
+import subprocess
 
 # 导入自定义模块
 from database import DatabaseManager
 from utils import DataValidator
 from charts import ChartGenerator
+from version_checker import VersionChecker
 
 # 配置matplotlib中文显示
 from matplotlib.font_manager import FontProperties
@@ -42,10 +46,18 @@ chinese_font = set_matplotlib_chinese()
 
 class StockTracker(ttk.Window):
     def __init__(self):
+        self.version = "1.0.0"  # 当前版本号
+        
         super().__init__(themename="litera")
         self.title("个人投资记账程序")
         self.geometry("1200x800")
         self.minsize(1000, 700)
+        
+        # 创建顶部工具栏
+        self.create_toolbar()
+        
+        # 创建菜单栏
+        self.create_menu()
         
         # 配置文件和数据库初始化
         self.init_config()
@@ -59,6 +71,16 @@ class StockTracker(ttk.Window):
         
         # 刷新数据显示
         self.refresh_data()
+        
+        # 处理命令行参数
+        self.handle_command_line_args()
+        
+        # 初始化更新检查器
+        self.version_checker = VersionChecker(self.version)
+        
+        # 检查自动更新
+        if self.version_checker.should_check_update():
+            self.check_for_updates(silent=True)
         
     def init_config(self):
         """初始化配置文件"""
@@ -1235,6 +1257,298 @@ class StockTracker(ttk.Window):
             
         except Exception as e:
             print(f"调整图表大小时出错：{str(e)}")
+
+    def handle_command_line_args(self):
+        """处理命令行参数"""
+        parser = argparse.ArgumentParser(description='个人投资记账程序')
+        parser.add_argument('--update', type=str, help='更新模式，需要结束的进程PID')
+        args = parser.parse_args()
+        
+        # 检查是否有待安装的更新
+        update_flag_file = Path(self.config_dir) / "update_ready"
+        if update_flag_file.exists():
+            try:
+                new_version_path = update_flag_file.read_text().strip()
+                if os.path.exists(new_version_path):
+                    # 启动新版本并退出当前版本
+                    subprocess.Popen([new_version_path])
+                    update_flag_file.unlink()  # 删除标记文件
+                    sys.exit(0)
+            except Exception as e:
+                print(f"安装更新失败: {str(e)}")
+                if update_flag_file.exists():
+                    update_flag_file.unlink()
+        
+        if args.update:
+            try:
+                old_pid = int(args.update)
+                # 等待旧进程结束
+                import time
+                import psutil
+                
+                max_wait = 30  # 最大等待30秒
+                while max_wait > 0:
+                    if not psutil.pid_exists(old_pid):
+                        break
+                    time.sleep(1)
+                    max_wait -= 1
+                
+                # 如果进程还在运行，强制结束
+                if psutil.pid_exists(old_pid):
+                    p = psutil.Process(old_pid)
+                    p.terminate()
+                    p.wait()
+            except Exception as e:
+                print(f"更新模式错误: {str(e)}")
+
+    def create_menu(self):
+        """创建菜单栏"""
+        menubar = tk.Menu(self)
+        self.config(menu=menubar)
+        
+        # 文件菜单
+        file_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="文件", menu=file_menu)
+        file_menu.add_command(label="导入", command=self.import_file)
+        file_menu.add_command(label="导出Excel", command=self.export_excel)
+        file_menu.add_separator()
+        file_menu.add_command(label="退出", command=self.quit)
+        
+        # 帮助菜单
+        help_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="帮助", menu=help_menu)
+        help_menu.add_command(label="检查更新", command=lambda: self.check_for_updates(silent=False))
+        help_menu.add_command(label="更新历史", command=self.show_update_history)
+        help_menu.add_command(label="更新设置", command=self.show_update_settings)
+        help_menu.add_separator()
+        help_menu.add_command(label="关于", command=self.show_about)
+    
+    def check_for_updates(self, silent=False):
+        """检查更新"""
+        update_info = self.version_checker.check_for_updates()
+        
+        if update_info["has_update"]:
+            if silent:
+                # 在后台自动下载
+                self.download_update_background(update_info)
+            else:
+                # 手动检查时显示提示
+                message = f"""发现新版本 {update_info['version']}
+                
+更新内容:
+{update_info['release_notes']}
+
+更新已在后台自动下载，将在下次启动时生效。"""
+                self.show_centered_message(message, title="发现新版本")
+    
+    def download_update_background(self, update_info):
+        """后台下载更新"""
+        try:
+            # 显示进度条
+            self.update_label.configure(text="正在下载更新...")
+            self.show_update_progress()
+            self.update_progress['value'] = 0
+            
+            def update_progress(value):
+                self.update_progress['value'] = value
+                if value >= 100:
+                    self.update_label.configure(text="更新已下载，下次启动生效")
+                    # 3秒后隐藏进度条
+                    self.after(3000, self.hide_update_progress)
+                self.update()
+            
+            # 在后台线程中下载
+            import threading
+            def download_thread():
+                try:
+                    # 下载更新
+                    new_version_path = self.version_checker.download_update(
+                        update_info['download_url'],
+                        update_info.get('checksum', ''),
+                        callback=update_progress
+                    )
+                    
+                    if new_version_path:
+                        # 备份当前版本
+                        if self.version_checker.backup_current_version():
+                            # 记录更新历史
+                            self.version_checker.add_update_history(
+                                update_info['version'],
+                                update_info['publish_date']
+                            )
+                            
+                            # 创建标记文件，指示下次启动时更新
+                            update_flag_file = Path(self.config_dir) / "update_ready"
+                            update_flag_file.write_text(new_version_path)
+                    else:
+                        self.update_label.configure(text="更新下载失败")
+                        self.after(3000, self.hide_update_progress)
+                        
+                except Exception as e:
+                    print(f"后台下载更新失败: {str(e)}")
+                    self.update_label.configure(text="更新下载失败")
+                    self.after(3000, self.hide_update_progress)
+            
+            # 启动下载线程
+            threading.Thread(target=download_thread, daemon=True).start()
+            
+        except Exception as e:
+            print(f"启动后台下载失败: {str(e)}")
+            self.hide_update_progress()
+            
+    def show_update_history(self):
+        """显示更新历史"""
+        history = self.version_checker.get_update_history()
+        if not history:
+            self.show_centered_message("暂无更新历史记录。", title="更新历史")
+            return
+            
+        history_window = ttk.Toplevel(self)
+        history_window.title("更新历史")
+        history_window.geometry("400x300")
+        self.center_window(history_window)
+        
+        # 创建表格
+        columns = ("日期", "版本", "原版本")
+        tree = ttk.Treeview(history_window, columns=columns, show="headings")
+        
+        # 设置列标题
+        for col in columns:
+            tree.heading(col, text=col)
+            tree.column(col, width=100)
+        
+        # 添加数据
+        for record in reversed(history):
+            tree.insert("", "end", values=(
+                datetime.fromisoformat(record["date"]).strftime("%Y-%m-%d %H:%M"),
+                record["version"],
+                record["previous_version"]
+            ))
+        
+        # 添加滚动条
+        scrollbar = ttk.Scrollbar(history_window, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=scrollbar.set)
+        
+        # 布局
+        tree.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+    
+    def show_update_settings(self):
+        """显示更新设置"""
+        config = self.version_checker.load_config()
+        
+        settings_window = ttk.Toplevel(self)
+        settings_window.title("更新设置")
+        settings_window.geometry("300x200")
+        self.center_window(settings_window)
+        
+        # 自动检查更新
+        auto_check_var = tk.BooleanVar(value=config["auto_check"])
+        auto_check = ttk.Checkbutton(
+            settings_window,
+            text="自动检查更新",
+            variable=auto_check_var
+        )
+        auto_check.pack(pady=10, padx=20, anchor="w")
+        
+        # 检查频率
+        freq_frame = ttk.Frame(settings_window)
+        freq_frame.pack(fill="x", padx=20, pady=5)
+        ttk.Label(freq_frame, text="检查频率:").pack(side="left")
+        freq_var = tk.StringVar(value=str(config["check_frequency"]))
+        freq_entry = ttk.Entry(freq_frame, width=5, textvariable=freq_var)
+        freq_entry.pack(side="left", padx=5)
+        ttk.Label(freq_frame, text="天").pack(side="left")
+        
+        # 静默更新
+        silent_update_var = tk.BooleanVar(value=config["silent_update"])
+        silent_update = ttk.Checkbutton(
+            settings_window,
+            text="静默安装更新",
+            variable=silent_update_var
+        )
+        silent_update.pack(pady=10, padx=20, anchor="w")
+        
+        def save_settings():
+            try:
+                freq = int(freq_var.get())
+                if freq < 1:
+                    raise ValueError("检查频率必须大于0")
+                    
+                config["auto_check"] = auto_check_var.get()
+                config["check_frequency"] = freq
+                config["silent_update"] = silent_update_var.get()
+                
+                self.version_checker.save_config(config)
+                settings_window.destroy()
+                
+                self.show_centered_message("设置已保存。", title="更新设置")
+                
+            except ValueError as e:
+                self.show_centered_message(
+                    str(e),
+                    title="输入错误",
+                    message_type="error"
+                )
+        
+        # 保存按钮
+        ttk.Button(
+            settings_window,
+            text="保存",
+            command=save_settings,
+            style="primary.TButton"
+        ).pack(pady=20)
+    
+    def show_about(self):
+        """显示关于对话框"""
+        message = f"""个人投资记账程序 v{self.version}
+
+一个简单的个人投资记账工具，帮助您追踪投资收益。
+
+© 2025 HX"""
+        
+        self.show_centered_message(
+            message,
+            title="关于",
+            message_type="info"
+        )
+
+    def create_toolbar(self):
+        """创建顶部工具栏"""
+        toolbar = ttk.Frame(self)
+        toolbar.pack(fill="x", padx=5, pady=2)
+        
+        # 左侧空间占位
+        ttk.Label(toolbar).pack(side="left", expand=True)
+        
+        # 更新进度条框架
+        self.update_frame = ttk.Frame(toolbar)
+        self.update_frame.pack(side="right", padx=5)
+        
+        # 更新标签
+        self.update_label = ttk.Label(self.update_frame, text="")
+        self.update_label.pack(side="left", padx=5)
+        
+        # 更新进度条
+        self.update_progress = ttk.Progressbar(
+            self.update_frame, 
+            length=100,
+            mode='determinate',
+            style='success.Horizontal.TProgressbar'
+        )
+        
+        # 初始时隐藏进度条和标签
+        self.hide_update_progress()
+
+    def show_update_progress(self):
+        """显示更新进度条"""
+        self.update_label.pack(side="left", padx=5)
+        self.update_progress.pack(side="left", padx=5)
+        
+    def hide_update_progress(self):
+        """隐藏更新进度条"""
+        self.update_label.pack_forget()
+        self.update_progress.pack_forget()
 
 if __name__ == "__main__":
     app = StockTracker()
