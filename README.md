@@ -43,8 +43,7 @@
 
 1. 克隆仓库
 ```bash
-git clone https://github.com/yourusername/stock-tracker.git
-cd stock-tracker
+git clone 
 ```
 
 2. 安装依赖

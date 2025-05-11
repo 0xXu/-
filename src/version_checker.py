@@ -8,12 +8,16 @@ import sys
 import subprocess
 import os
 import shutil
+import urllib3
+
+# 禁用SSL警告
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 class VersionChecker:
     def __init__(self, current_version="1.0.0"):
         self.current_version = current_version
-        # GitHub API URL - 需要替换为您的仓库地址
-        self.github_api_url = "https://api.github.com/repos/你的用户名/你的仓库名/releases/latest"
+        # 直接写死 GitHub API URL
+        self.github_api_url = "https://api.github.com/repos/0xXu/Personal-Investment-Accounting-Procedure/releases/latest"
         
         # 配置文件和临时文件路径
         self.config_dir = Path.home() / "AccountTracker"
@@ -28,6 +32,10 @@ class VersionChecker:
         
         # 初始化配置
         self.init_config()
+        
+        # 打印调试信息
+        print(f"版本检查器初始化完成，当前版本: {self.current_version}")
+        print(f"GitHub API URL: {self.github_api_url}")
     
     def init_config(self):
         """初始化更新配置文件"""
@@ -71,7 +79,8 @@ class VersionChecker:
     def check_for_updates(self):
         """检查更新"""
         try:
-            response = requests.get(self.github_api_url, timeout=10)
+            # 禁用SSL验证
+            response = requests.get(self.github_api_url, timeout=10, verify=False)
             if response.status_code == 200:
                 latest_release = response.json()
                 latest_version = latest_release["tag_name"].lstrip("v")
@@ -115,7 +124,8 @@ class VersionChecker:
     def download_update(self, download_url, checksum="", callback=None):
         """下载更新"""
         try:
-            response = requests.get(download_url, stream=True, timeout=30)
+            # 禁用SSL验证
+            response = requests.get(download_url, stream=True, timeout=30, verify=False)
             total_size = int(response.headers.get('content-length', 0))
             
             # 下载到临时文件

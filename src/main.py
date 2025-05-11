@@ -1325,7 +1325,12 @@ class StockTracker(ttk.Window):
     
     def check_for_updates(self, silent=False):
         """检查更新"""
+        print("开始检查更新...")
+        print(f"当前版本: {self.version}")
+        print(f"GitHub API URL: {self.version_checker.github_api_url}")
+        
         update_info = self.version_checker.check_for_updates()
+        print(f"检查结果: {update_info}")
         
         if update_info["has_update"]:
             if silent:
@@ -1340,7 +1345,14 @@ class StockTracker(ttk.Window):
 
 更新已在后台自动下载，将在下次启动时生效。"""
                 self.show_centered_message(message, title="发现新版本")
-    
+        else:
+            if not silent:
+                # 如果是手动检查，没有更新时也显示提示
+                if "error" in update_info:
+                    self.show_centered_message(f"检查更新时出错：{update_info['error']}", title="检查更新")
+                else:
+                    self.show_centered_message("您使用的已经是最新版本。", title="检查更新")
+
     def download_update_background(self, update_info):
         """后台下载更新"""
         try:
