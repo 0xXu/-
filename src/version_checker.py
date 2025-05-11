@@ -79,22 +79,37 @@ class VersionChecker:
     def check_for_updates(self):
         """检查更新"""
         try:
+            print("正在检查更新...")
             # 禁用SSL验证
             response = requests.get(self.github_api_url, timeout=10, verify=False)
             if response.status_code == 200:
                 latest_release = response.json()
                 latest_version = latest_release["tag_name"].lstrip("v")
                 
+                print(f"最新版本: {latest_version}")
+                print(f"当前版本: {self.current_version}")
+                
                 if version.parse(latest_version) > version.parse(self.current_version):
+                    print("发现新版本")
+                    
+                    # 提取 SHA256 校验值
+                    body = latest_release.get("body", "")
+                    checksum = ""
+                    for line in body.split("\n"):
+                        if line.strip().startswith("SHA256:"):
+                            checksum = line.split("SHA256:", 1)[1].strip()
+                            break
+                    
                     update_info = {
                         "has_update": True,
                         "version": latest_version,
                         "download_url": latest_release["assets"][0]["browser_download_url"],
                         "release_notes": latest_release["body"],
-                        "checksum": latest_release.get("body", "").split("SHA256: ")[-1].split("\n")[0],
+                        "checksum": checksum,
                         "publish_date": latest_release["published_at"]
                     }
                 else:
+                    print("已是最新版本")
                     update_info = {"has_update": False}
                     
                 # 更新最后检查时间
@@ -124,6 +139,7 @@ class VersionChecker:
     def download_update(self, download_url, checksum="", callback=None):
         """下载更新"""
         try:
+            print(f"开始下载更新: {download_url}")
             # 禁用SSL验证
             response = requests.get(download_url, stream=True, timeout=30, verify=False)
             total_size = int(response.headers.get('content-length', 0))
@@ -133,6 +149,7 @@ class VersionChecker:
             if temp_file.exists():
                 temp_file.unlink()
             
+            print(f"下载到临时文件: {temp_file}")
             block_size = 1024
             downloaded = 0
             
@@ -143,10 +160,12 @@ class VersionChecker:
                     if callback:
                         callback(downloaded / total_size * 100)
             
+            print("下载完成，开始验证文件...")
             # 验证文件完整性
             if checksum and not self.verify_file(temp_file, checksum):
                 raise Exception("文件校验失败")
-                
+            
+            print(f"文件验证成功，路径: {temp_file}")
             return str(temp_file)
             
         except Exception as e:
@@ -156,9 +175,18 @@ class VersionChecker:
     def backup_current_version(self):
         """备份当前版本"""
         try:
-            current_exe = sys.executable
+            # 获取当前程序路径
+            if getattr(sys, 'frozen', False):
+                # 如果是打包后的exe
+                current_exe = sys.executable
+            else:
+                # 如果是python脚本
+                current_exe = sys.argv[0]
+            
+            print(f"备份当前版本: {current_exe}")
             backup_file = self.backup_dir / f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.exe"
             shutil.copy2(current_exe, backup_file)
+            print(f"备份成功: {backup_file}")
             return True
         except Exception as e:
             print(f"备份失败: {str(e)}")

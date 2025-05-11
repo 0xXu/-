@@ -19,6 +19,7 @@ import re
 import argparse
 import os
 import subprocess
+import shutil
 
 # 导入自定义模块
 from database import DatabaseManager
@@ -1277,143 +1278,150 @@ class StockTracker(ttk.Window):
         parser.add_argument('--new-version', type=str, help='新版本号')
         args = parser.parse_args()
         
-        # 检查是否有待安装的更新
+        print("检查更新标记文件...")
         update_flag_file = Path(self.config_dir) / "update_ready"
-        if update_flag_file.exists():
-            try:
+        
+        try:
+            if update_flag_file.exists():
+                print("发现更新标记文件")
                 with open(update_flag_file, "r") as f:
                     update_info = json.load(f)
                 new_version_path = update_info["path"]
                 new_version = update_info["version"]
                 
-                if os.path.exists(new_version_path):
-                    # 启动新版本并退出当前版本
-                    subprocess.Popen([new_version_path, "--new-version", new_version])
-                    update_flag_file.unlink()  # 删除标记文件
-                    sys.exit(0)
-            except Exception as e:
-                print(f"安装更新失败: {str(e)}")
-                if update_flag_file.exists():
+                print(f"新版本路径: {new_version_path}")
+                print(f"新版本号: {new_version}")
+                
+                if not os.path.exists(new_version_path):
+                    print(f"更新文件不存在: {new_version_path}")
                     update_flag_file.unlink()
-        
-        # 处理更新参数
-        if args.update:
-            try:
-                old_pid = int(args.update)
-                # 等待旧进程结束
-                import time
-                import psutil
+                    return
                 
-                max_wait = 30  # 最大等待30秒
-                while max_wait > 0:
-                    if not psutil.pid_exists(old_pid):
-                        break
-                    time.sleep(1)
-                    max_wait -= 1
+                # 如果是更新模式，等待旧进程结束
+                if args.update:
+                    try:
+                        old_pid = int(args.update)
+                        print(f"等待旧进程结束: {old_pid}")
+                        
+                        import time
+                        import psutil
+                        
+                        # 等待旧进程结束，最多等待30秒
+                        for _ in range(30):
+                            if not psutil.pid_exists(old_pid):
+                                break
+                            time.sleep(1)
+                        
+                        # 如果进程还在运行，强制结束
+                        if psutil.pid_exists(old_pid):
+                            print(f"强制结束旧进程: {old_pid}")
+                            p = psutil.Process(old_pid)
+                            p.terminate()
+                            time.sleep(2)
+                            if p.is_running():
+                                p.kill()
+                    except Exception as e:
+                        print(f"处理旧进程时出错: {str(e)}")
                 
-                # 如果进程还在运行，强制结束
-                if psutil.pid_exists(old_pid):
-                    p = psutil.Process(old_pid)
-                    p.terminate()
-                    p.wait()
-            except Exception as e:
-                print(f"更新模式错误: {str(e)}")
+                # 更新版本号
+                self.update_version(new_version)
+                
+                # 如果是exe，则替换当前文件
+                if getattr(sys, 'frozen', False):
+                    current_exe = sys.executable
+                    print(f"当前程序路径: {current_exe}")
+                    
+                    try:
+                        # 备份当前文件
+                        backup_path = current_exe + ".bak"
+                        if os.path.exists(backup_path):
+                            os.remove(backup_path)
+                        os.rename(current_exe, backup_path)
+                        
+                        # 复制新文件
+                        shutil.copy2(new_version_path, current_exe)
+                        
+                        # 验证新文件
+                        if os.path.exists(current_exe) and os.path.getsize(current_exe) > 0:
+                            # 删除备份和临时文件
+                            os.remove(backup_path)
+                            os.remove(new_version_path)
+                            print("更新安装完成")
+                        else:
+                            # 恢复备份
+                            os.remove(current_exe)
+                            os.rename(backup_path, current_exe)
+                            
+                    except Exception as e:
+                        print(f"更新安装失败: {str(e)}")
+                        # 恢复备份
+                        if os.path.exists(backup_path):
+                            if os.path.exists(current_exe):
+                                os.remove(current_exe)
+                            os.rename(backup_path, current_exe)
+                
+                # 删除更新标记文件
+                update_flag_file.unlink()
+                print("更新标记文件已删除")
+                
+                # 如果不是更新模式，说明是第一次启动，不需要重启
+                if not args.update:
+                    print("首次启动，继续运行")
+                    return
+                
+                print("重启到新版本")
+                # 启动新版本
+                subprocess.Popen([current_exe])
+                sys.exit(0)
+                
+        except Exception as e:
+            print(f"安装更新失败: {str(e)}")
+            if update_flag_file.exists():
+                update_flag_file.unlink()
         
         # 处理新版本参数
         if args.new_version:
+            print(f"设置新版本号: {args.new_version}")
             self.update_version(args.new_version)
-
-    def download_update_background(self, update_info):
-        """后台下载更新"""
-        try:
-            # 显示进度条
-            self.update_label.configure(text="正在下载更新...")
-            self.show_update_progress()
-            self.update_progress['value'] = 0
-            
-            def update_progress(value):
-                self.update_progress['value'] = value
-                if value >= 100:
-                    self.update_label.configure(text="更新已下载，下次启动生效")
-                    # 3秒后隐藏进度条
-                    self.after(3000, self.hide_update_progress)
-                self.update()
-            
-            # 在后台线程中下载
-            import threading
-            def download_thread():
-                try:
-                    # 保存更新信息的副本
-                    version_info = {
-                        'version': update_info['version'],
-                        'publish_date': update_info['publish_date']
-                    }
-                    
-                    # 下载更新
-                    new_version_path = self.version_checker.download_update(
-                        update_info['download_url'],
-                        update_info.get('checksum', ''),
-                        callback=update_progress
-                    )
-                    
-                    if new_version_path:
-                        # 备份当前版本
-                        if self.version_checker.backup_current_version():
-                            # 记录更新历史
-                            self.version_checker.add_update_history(
-                                version_info['version'],
-                                version_info['publish_date']
-                            )
-                            
-                            # 创建标记文件，包含新版本信息
-                            update_flag_file = Path(self.config_dir) / "update_ready"
-                            update_data = {
-                                "path": new_version_path,
-                                "version": version_info['version']
-                            }
-                            with open(update_flag_file, "w") as f:
-                                json.dump(update_data, f)
-                            
-                            # 提示用户重启程序
-                            self.after(0, lambda: self.show_centered_message(
-                                "更新已下载完成，重启程序后将自动安装新版本。\n是否现在重启？",
-                                title="更新就绪",
-                                message_type="question",
-                                buttons=["是", "否"],
-                                callback=lambda response: self.restart_for_update() if response == "是" else None
-                            ))
-                    else:
-                        self.after(0, lambda: self.update_label.configure(text="更新下载失败"))
-                        self.after(3000, self.hide_update_progress)
-                        
-                except Exception as e:
-                    print(f"后台下载更新失败: {str(e)}")
-                    self.after(0, lambda: self.update_label.configure(text="更新下载失败"))
-                    self.after(3000, self.hide_update_progress)
-            
-            # 启动下载线程
-            threading.Thread(target=download_thread, daemon=True).start()
-            
-        except Exception as e:
-            print(f"启动后台下载失败: {str(e)}")
-            self.hide_update_progress()
-
-    def restart_for_update(self):
-        """重启程序以安装更新"""
-        self.quit()
 
     def update_version(self, new_version):
         """更新程序版本号"""
-        self.version = new_version
-        # 更新配置文件
-        if self.config_file.exists():
-            with open(self.config_file, "r", encoding="utf-8") as f:
-                config = json.load(f)
+        try:
+            print(f"更新版本号: {new_version}")
+            self.version = new_version
+            
+            # 读取现有配置
+            config = {}
+            if self.config_file.exists():
+                with open(self.config_file, "r", encoding="utf-8") as f:
+                    try:
+                        config = json.load(f)
+                    except json.JSONDecodeError:
+                        print("配置文件损坏，将创建新配置")
+            
+            # 更新配置
             config["version"] = new_version
+            config.setdefault("theme", "litera")
+            config.setdefault("backup_interval", 30)
+            config.setdefault("last_backup", "")
+            config.setdefault("window_size", "1200x800")
+            
+            # 保存配置
             with open(self.config_file, "w", encoding="utf-8") as f:
                 json.dump(config, f, ensure_ascii=False, indent=4)
-        # 更新窗口标题
-        self.title(f"个人投资记账程序 v{self.version}")
+            
+            print(f"配置文件已更新: {self.config_file}")
+            
+            # 更新窗口标题
+            self.title(f"个人投资记账程序 v{self.version}")
+            print(f"版本已更新到: {self.version}")
+            
+            # 触发版本更新事件
+            self.event_generate("<<VersionUpdated>>")
+            
+        except Exception as e:
+            print(f"更新版本号失败: {str(e)}")
+            self.show_centered_message(f"更新版本号失败: {str(e)}", "错误", "error")
 
     def create_menu(self):
         """创建菜单栏"""
@@ -1466,6 +1474,125 @@ class StockTracker(ttk.Window):
                     self.show_centered_message(f"检查更新时出错：{update_info['error']}", title="检查更新")
                 else:
                     self.show_centered_message("您使用的已经是最新版本。", title="检查更新")
+
+    def download_update_background(self, update_info):
+        """后台下载更新"""
+        try:
+            # 检查是否已经有更新在等待安装
+            update_flag_file = Path(self.config_dir) / "update_ready"
+            if update_flag_file.exists():
+                print("已有更新等待安装，跳过下载")
+                return
+            
+            # 显示进度条
+            self.update_label.configure(text="正在下载更新...")
+            self.show_update_progress()
+            self.update_progress['value'] = 0
+            
+            def update_progress(value):
+                self.update_progress['value'] = value
+                if value >= 100:
+                    self.update_label.configure(text="更新已下载，下次启动生效")
+                    # 3秒后隐藏进度条
+                    self.after(3000, self.hide_update_progress)
+                self.update()
+            
+            # 在后台线程中下载
+            import threading
+            def download_thread():
+                try:
+                    # 保存更新信息的副本
+                    version_info = {
+                        'version': update_info['version'],
+                        'publish_date': update_info['publish_date']
+                    }
+                    
+                    # 下载更新
+                    new_version_path = self.version_checker.download_update(
+                        update_info['download_url'],
+                        update_info.get('checksum', ''),
+                        callback=update_progress
+                    )
+                    
+                    if new_version_path:
+                        # 验证下载的文件
+                        if not os.path.exists(new_version_path) or os.path.getsize(new_version_path) == 0:
+                            raise Exception("下载的文件无效")
+                        
+                        # 记录更新历史
+                        self.version_checker.add_update_history(
+                            version_info['version'],
+                            version_info['publish_date']
+                        )
+                        
+                        # 创建标记文件，包含新版本信息
+                        update_data = {
+                            "path": new_version_path,
+                            "version": version_info['version'],
+                            "download_time": datetime.now().isoformat()
+                        }
+                        with open(update_flag_file, "w") as f:
+                            json.dump(update_data, f)
+                        
+                        # 提示用户重启程序
+                        self.after(0, lambda: self.show_centered_message(
+                            "更新已下载完成，重启程序后将自动安装新版本。\n是否现在重启？",
+                            title="更新就绪",
+                            message_type="question",
+                            buttons=["是", "否"],
+                            callback=lambda response: self.restart_for_update() if response == "是" else None
+                        ))
+                    else:
+                        self.after(0, lambda: self.update_label.configure(text="更新下载失败"))
+                        self.after(3000, self.hide_update_progress)
+                        
+                except Exception as e:
+                    print(f"后台下载更新失败: {str(e)}")
+                    self.after(0, lambda: self.update_label.configure(text="更新下载失败"))
+                    self.after(3000, self.hide_update_progress)
+                    # 清理可能存在的临时文件
+                    if 'new_version_path' in locals() and os.path.exists(new_version_path):
+                        try:
+                            os.remove(new_version_path)
+                        except:
+                            pass
+            
+            # 启动下载线程
+            threading.Thread(target=download_thread, daemon=True).start()
+            
+        except Exception as e:
+            print(f"启动后台下载失败: {str(e)}")
+            self.hide_update_progress()
+
+    def restart_for_update(self):
+        """重启程序以安装更新"""
+        try:
+            # 获取当前进程的PID
+            current_pid = os.getpid()
+            
+            # 获取当前程序路径
+            if getattr(sys, 'frozen', False):
+                # 如果是打包后的exe
+                current_path = sys.executable
+            else:
+                # 如果是python脚本
+                current_path = os.path.abspath(sys.argv[0])
+            
+            # 读取更新标记文件
+            update_flag_file = Path(self.config_dir) / "update_ready"
+            if update_flag_file.exists():
+                with open(update_flag_file, "r") as f:
+                    update_info = json.load(f)
+                new_version_path = update_info["path"]
+                
+                if os.path.exists(new_version_path):
+                    # 启动新版本，传递当前PID
+                    subprocess.Popen([new_version_path, "--update", str(current_pid)])
+                    # 退出当前程序
+                    self.quit()
+        except Exception as e:
+            print(f"重启更新失败: {str(e)}")
+            self.show_centered_message(f"重启更新失败: {str(e)}", "错误", "error")
 
     def show_update_history(self):
         """显示更新历史"""
@@ -1606,7 +1733,7 @@ class StockTracker(ttk.Window):
             self.update_frame, 
             length=100,
             mode='determinate',
-            style='success.Horizontal.TProgressbar'
+            bootstyle="success"  # 使用绿色样式
         )
         
         # 初始时隐藏进度条和标签
