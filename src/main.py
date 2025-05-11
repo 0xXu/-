@@ -46,15 +46,30 @@ chinese_font = set_matplotlib_chinese()
 
 class StockTracker(ttk.Window):
     def __init__(self):
-        self.version = "1.0.0"  # 当前版本号
+        # 从配置文件读取版本号
+        self.config_dir = Path.home() / "AccountTracker"
+        self.config_dir.mkdir(exist_ok=True)
+        self.config_file = self.config_dir / "config.json"
         
+        # 读取或初始化配置
+        if self.config_file.exists():
+            with open(self.config_file, "r", encoding="utf-8") as f:
+                config = json.load(f)
+                self.version = config.get("version", "1.0.0")
+        else:
+            self.version = "1.0.0"
+            
         super().__init__(themename="litera")
-        self.title("个人投资记账程序")
+        self.title(f"个人投资记账程序 v{self.version}")
         self.geometry("1200x800")
         self.minsize(1000, 700)
         
-        # 创建顶部工具栏
+        # 创建顶部工具栏（包含更新进度条）
         self.create_toolbar()
+        
+        # 初始化更新检查器并立即检查更新
+        self.version_checker = VersionChecker(self.version)
+        self.check_for_updates(silent=True)
         
         # 创建菜单栏
         self.create_menu()
@@ -72,16 +87,9 @@ class StockTracker(ttk.Window):
         # 刷新数据显示
         self.refresh_data()
         
-        # 处理命令行参数
+        # 处理命令行参数（包括更新安装）
         self.handle_command_line_args()
-        
-        # 初始化更新检查器
-        self.version_checker = VersionChecker(self.version)
-        
-        # 检查自动更新
-        if self.version_checker.should_check_update():
-            self.check_for_updates(silent=True)
-        
+
     def init_config(self):
         """初始化配置文件"""
         self.config_dir = Path.home() / "AccountTracker"
@@ -95,7 +103,8 @@ class StockTracker(ttk.Window):
                 "theme": "litera",
                 "backup_interval": 30,  # 分钟
                 "last_backup": "",
-                "window_size": "1200x800"
+                "window_size": "1200x800",
+                "version": self.version
             }
             with open(self.config_file, "w", encoding="utf-8") as f:
                 json.dump(default_config, f, ensure_ascii=False, indent=4)
@@ -1170,7 +1179,7 @@ class StockTracker(ttk.Window):
         else:
             self.show_centered_message(f"清空失败：{error}", "错误", "error")
 
-    def show_centered_message(self, message, title="提示", message_type="info", buttons=None):
+    def show_centered_message(self, message, title="提示", message_type="info", buttons=None, callback=None):
         """显示居中的消息框"""
         dialog = None
         
@@ -1181,7 +1190,10 @@ class StockTracker(ttk.Window):
         elif message_type == "warning":
             dialog = Messagebox.show_warning(message, title, parent=self)
         elif message_type == "question":
-            return Messagebox.show_question(message, title, parent=self, buttons=buttons)
+            result = Messagebox.show_question(message, title, parent=self, buttons=buttons)
+            if callback:
+                callback(result)
+            return result
         else:
             dialog = Messagebox.show_info(message, title, parent=self)
         
@@ -1262,16 +1274,21 @@ class StockTracker(ttk.Window):
         """处理命令行参数"""
         parser = argparse.ArgumentParser(description='个人投资记账程序')
         parser.add_argument('--update', type=str, help='更新模式，需要结束的进程PID')
+        parser.add_argument('--new-version', type=str, help='新版本号')
         args = parser.parse_args()
         
         # 检查是否有待安装的更新
         update_flag_file = Path(self.config_dir) / "update_ready"
         if update_flag_file.exists():
             try:
-                new_version_path = update_flag_file.read_text().strip()
+                with open(update_flag_file, "r") as f:
+                    update_info = json.load(f)
+                new_version_path = update_info["path"]
+                new_version = update_info["version"]
+                
                 if os.path.exists(new_version_path):
                     # 启动新版本并退出当前版本
-                    subprocess.Popen([new_version_path])
+                    subprocess.Popen([new_version_path, "--new-version", new_version])
                     update_flag_file.unlink()  # 删除标记文件
                     sys.exit(0)
             except Exception as e:
@@ -1279,6 +1296,7 @@ class StockTracker(ttk.Window):
                 if update_flag_file.exists():
                     update_flag_file.unlink()
         
+        # 处理更新参数
         if args.update:
             try:
                 old_pid = int(args.update)
@@ -1300,6 +1318,102 @@ class StockTracker(ttk.Window):
                     p.wait()
             except Exception as e:
                 print(f"更新模式错误: {str(e)}")
+        
+        # 处理新版本参数
+        if args.new_version:
+            self.update_version(args.new_version)
+
+    def download_update_background(self, update_info):
+        """后台下载更新"""
+        try:
+            # 显示进度条
+            self.update_label.configure(text="正在下载更新...")
+            self.show_update_progress()
+            self.update_progress['value'] = 0
+            
+            def update_progress(value):
+                self.update_progress['value'] = value
+                if value >= 100:
+                    self.update_label.configure(text="更新已下载，下次启动生效")
+                    # 3秒后隐藏进度条
+                    self.after(3000, self.hide_update_progress)
+                self.update()
+            
+            # 在后台线程中下载
+            import threading
+            def download_thread():
+                try:
+                    # 保存更新信息的副本
+                    version_info = {
+                        'version': update_info['version'],
+                        'publish_date': update_info['publish_date']
+                    }
+                    
+                    # 下载更新
+                    new_version_path = self.version_checker.download_update(
+                        update_info['download_url'],
+                        update_info.get('checksum', ''),
+                        callback=update_progress
+                    )
+                    
+                    if new_version_path:
+                        # 备份当前版本
+                        if self.version_checker.backup_current_version():
+                            # 记录更新历史
+                            self.version_checker.add_update_history(
+                                version_info['version'],
+                                version_info['publish_date']
+                            )
+                            
+                            # 创建标记文件，包含新版本信息
+                            update_flag_file = Path(self.config_dir) / "update_ready"
+                            update_data = {
+                                "path": new_version_path,
+                                "version": version_info['version']
+                            }
+                            with open(update_flag_file, "w") as f:
+                                json.dump(update_data, f)
+                            
+                            # 提示用户重启程序
+                            self.after(0, lambda: self.show_centered_message(
+                                "更新已下载完成，重启程序后将自动安装新版本。\n是否现在重启？",
+                                title="更新就绪",
+                                message_type="question",
+                                buttons=["是", "否"],
+                                callback=lambda response: self.restart_for_update() if response == "是" else None
+                            ))
+                    else:
+                        self.after(0, lambda: self.update_label.configure(text="更新下载失败"))
+                        self.after(3000, self.hide_update_progress)
+                        
+                except Exception as e:
+                    print(f"后台下载更新失败: {str(e)}")
+                    self.after(0, lambda: self.update_label.configure(text="更新下载失败"))
+                    self.after(3000, self.hide_update_progress)
+            
+            # 启动下载线程
+            threading.Thread(target=download_thread, daemon=True).start()
+            
+        except Exception as e:
+            print(f"启动后台下载失败: {str(e)}")
+            self.hide_update_progress()
+
+    def restart_for_update(self):
+        """重启程序以安装更新"""
+        self.quit()
+
+    def update_version(self, new_version):
+        """更新程序版本号"""
+        self.version = new_version
+        # 更新配置文件
+        if self.config_file.exists():
+            with open(self.config_file, "r", encoding="utf-8") as f:
+                config = json.load(f)
+            config["version"] = new_version
+            with open(self.config_file, "w", encoding="utf-8") as f:
+                json.dump(config, f, ensure_ascii=False, indent=4)
+        # 更新窗口标题
+        self.title(f"个人投资记账程序 v{self.version}")
 
     def create_menu(self):
         """创建菜单栏"""
@@ -1353,61 +1467,6 @@ class StockTracker(ttk.Window):
                 else:
                     self.show_centered_message("您使用的已经是最新版本。", title="检查更新")
 
-    def download_update_background(self, update_info):
-        """后台下载更新"""
-        try:
-            # 显示进度条
-            self.update_label.configure(text="正在下载更新...")
-            self.show_update_progress()
-            self.update_progress['value'] = 0
-            
-            def update_progress(value):
-                self.update_progress['value'] = value
-                if value >= 100:
-                    self.update_label.configure(text="更新已下载，下次启动生效")
-                    # 3秒后隐藏进度条
-                    self.after(3000, self.hide_update_progress)
-                self.update()
-            
-            # 在后台线程中下载
-            import threading
-            def download_thread():
-                try:
-                    # 下载更新
-                    new_version_path = self.version_checker.download_update(
-                        update_info['download_url'],
-                        update_info.get('checksum', ''),
-                        callback=update_progress
-                    )
-                    
-                    if new_version_path:
-                        # 备份当前版本
-                        if self.version_checker.backup_current_version():
-                            # 记录更新历史
-                            self.version_checker.add_update_history(
-                                update_info['version'],
-                                update_info['publish_date']
-                            )
-                            
-                            # 创建标记文件，指示下次启动时更新
-                            update_flag_file = Path(self.config_dir) / "update_ready"
-                            update_flag_file.write_text(new_version_path)
-                    else:
-                        self.update_label.configure(text="更新下载失败")
-                        self.after(3000, self.hide_update_progress)
-                        
-                except Exception as e:
-                    print(f"后台下载更新失败: {str(e)}")
-                    self.update_label.configure(text="更新下载失败")
-                    self.after(3000, self.hide_update_progress)
-            
-            # 启动下载线程
-            threading.Thread(target=download_thread, daemon=True).start()
-            
-        except Exception as e:
-            print(f"启动后台下载失败: {str(e)}")
-            self.hide_update_progress()
-            
     def show_update_history(self):
         """显示更新历史"""
         history = self.version_checker.get_update_history()
@@ -1517,11 +1576,12 @@ class StockTracker(ttk.Window):
 
 一个简单的个人投资记账工具，帮助您追踪投资收益。
 
+当前版本：{self.version}
 © 2025 HX"""
         
         self.show_centered_message(
             message,
-            title="关于",
+            title=f"关于 - v{self.version}",
             message_type="info"
         )
 
