@@ -9,15 +9,21 @@ import subprocess
 import os
 import shutil
 import urllib3
+import platform
+from urllib.parse import quote
 
 # 禁用SSL警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 class VersionChecker:
-    def __init__(self, current_version="1.0.0"):
+    def __init__(self, current_version="1.0.0", github_token=None):
         self.current_version = current_version
-        # 直接写死 GitHub API URL
-        self.github_api_url = "https://api.github.com/repos/0xXu/Personal-Investment-Accounting-Procedure/releases/latest"
+        self.github_token = github_token
+        # 使用URL编码处理API URL
+        base_url = "https://api.github.com/repos"
+        owner = "0xXu"
+        repo = "Personal-Investment-Accounting-Procedure"
+        self.github_api_url = f"{base_url}/{quote(owner)}/{quote(repo)}/releases/latest"
         
         # 配置文件和临时文件路径
         self.config_dir = Path.home() / "AccountTracker"
@@ -45,7 +51,8 @@ class VersionChecker:
                 "auto_check": True,
                 "check_frequency": 7,  # 天数
                 "silent_update": False,
-                "update_history": []
+                "update_history": [],
+                "github_token": ""  # 添加GitHub Token配置
             }
             self.save_config(default_config)
         
@@ -80,8 +87,35 @@ class VersionChecker:
         """检查更新"""
         try:
             print("正在检查更新...")
-            # 禁用SSL验证
-            response = requests.get(self.github_api_url, timeout=10, verify=False)
+            
+            # 准备请求头
+            headers = {
+                'Accept': 'application/vnd.github.v3+json',
+                'User-Agent': 'Personal-Investment-Accounting-Procedure-Updater'
+            }
+            
+            # 优先使用命令行传入的token，其次使用配置文件中的token
+            token = self.github_token
+            if not token:
+                config = self.load_config()
+                token = config.get("github_token")
+            
+            if token:
+                headers['Authorization'] = f'token {token}'
+                print("使用GitHub Token进行认证")
+            else:
+                print("警告: 未配置GitHub Token，可能会受到API访问限制")
+            
+            # 发送请求
+            response = requests.get(
+                self.github_api_url,
+                headers=headers,
+                timeout=10,
+                verify=False
+            )
+            
+            print(f"API响应状态码: {response.status_code}")
+            
             if response.status_code == 200:
                 latest_release = response.json()
                 latest_version = latest_release["tag_name"].lstrip("v")
@@ -89,28 +123,65 @@ class VersionChecker:
                 print(f"最新版本: {latest_version}")
                 print(f"当前版本: {self.current_version}")
                 
-                if version.parse(latest_version) > version.parse(self.current_version):
-                    print("发现新版本")
+                try:
+                    latest_ver = version.parse(latest_version)
+                    current_ver = version.parse(self.current_version)
+                    print(f"版本比较: {latest_ver} > {current_ver}")
                     
-                    # 提取 SHA256 校验值
-                    body = latest_release.get("body", "")
-                    checksum = ""
-                    for line in body.split("\n"):
-                        if line.strip().startswith("SHA256:"):
-                            checksum = line.split("SHA256:", 1)[1].strip()
-                            break
-                    
-                    update_info = {
-                        "has_update": True,
-                        "version": latest_version,
-                        "download_url": latest_release["assets"][0]["browser_download_url"],
-                        "release_notes": latest_release["body"],
-                        "checksum": checksum,
-                        "publish_date": latest_release["published_at"]
-                    }
-                else:
-                    print("已是最新版本")
-                    update_info = {"has_update": False}
+                    if latest_ver > current_ver:
+                        print("发现新版本")
+                        
+                        # 获取第一个可用的资源
+                        download_url = None
+                        checksum = ""
+                        
+                        if latest_release["assets"]:
+                            asset = latest_release["assets"][0]
+                            download_url = asset["browser_download_url"]
+                            print(f"找到更新文件: {asset['name']}")
+                            print(f"下载地址: {download_url}")
+                        else:
+                            print("警告: 发布中没有任何资源文件")
+                        
+                        # 如果没有找到任何可用版本，返回错误
+                        if not download_url:
+                            print("未找到可用的更新文件")
+                            return {
+                                "has_update": False,
+                                "error": "未找到可用的更新文件，请联系开发者"
+                            }
+                        
+                        # 提取 SHA256 校验值
+                        body = latest_release.get("body", "")
+                        print("\n发布说明:")
+                        print(body)
+                        print("\n正在查找校验值...")
+                        
+                        for line in body.split("\n"):
+                            line = line.strip()
+                            if line.startswith("SHA256"):
+                                checksum = line.split(":", 1)[1].strip()
+                                print(f"找到校验值: {checksum}")
+                                break
+                        
+                        if not checksum:
+                            print("警告: 未找到校验值")
+                        
+                        update_info = {
+                            "has_update": True,
+                            "version": latest_version,
+                            "download_url": download_url,
+                            "release_notes": latest_release["body"],
+                            "checksum": checksum,
+                            "publish_date": latest_release["published_at"]
+                        }
+                    else:
+                        print(f"版本比较结果: 当前版本 {self.current_version} 已是最新")
+                        update_info = {"has_update": False}
+                        
+                except version.InvalidVersion as e:
+                    print(f"版本号解析错误: {str(e)}")
+                    return {"has_update": False, "error": f"版本号格式错误: {str(e)}"}
                     
                 # 更新最后检查时间
                 config = self.load_config()
@@ -118,9 +189,19 @@ class VersionChecker:
                 self.save_config(config)
                 
                 return update_info
+            else:
+                error_msg = f"API请求失败: {response.status_code}"
+                if response.status_code == 403:
+                    error_msg += "\n请考虑配置GitHub Token以提高API访问限制"
+                print(f"API请求失败，状态码: {response.status_code}")
+                print(f"响应内容: {response.text}")
+                return {"has_update": False, "error": error_msg}
                 
         except Exception as e:
             print(f"检查更新时出错: {str(e)}")
+            import traceback
+            print("错误详情:")
+            print(traceback.format_exc())
             return {"has_update": False, "error": str(e)}
             
         return {"has_update": False}
