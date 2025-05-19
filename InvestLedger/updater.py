@@ -17,7 +17,7 @@ class UpdateChecker:
     
     def __init__(self, current_version):
         self.current_version = current_version
-        self.github_api_url = "https://api.github.com/repos/yourusername/InvestLedger/releases/latest"
+        self.github_api_url = "https://api.github.com/repos/0xXu/Personal-Investment-Accounting-Procedure/releases/latest"
         self.update_available = False
         self.latest_version = None
         self.download_url = None

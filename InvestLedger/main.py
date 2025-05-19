@@ -13,12 +13,21 @@ from PySide6.QtCore import QObject, QUrl, Signal, Slot, Property, QtMsgType, qIn
 
 # 尝试导入Qt Charts模块
 try:
-    from PySide6.QtCharts import QtCharts
+    from PySide6 import QtCharts
     has_charts = True
     logging.info("Qt Charts 模块加载成功")
 except ImportError:
     has_charts = False
     logging.warning("无法加载 Qt Charts 模块，图表功能将被禁用")
+
+# 尝试导入QtGraphicalEffects模块（用于DropShadow等效果）
+try:
+    from PySide6 import QtQuickEffects
+    has_effects = True
+    
+except ImportError:
+    has_effects = False
+    
 
 # 版本信息
 __version__ = "0.1.0"
@@ -132,7 +141,16 @@ class MainApplication(QObject):
         context.setContextProperty("backend", self.ui_backend)
         context.setContextProperty("appVersion", __version__)
         context.setContextProperty("hasCharts", has_charts)  # 向QML传递Charts模块可用状态
+        context.setContextProperty("hasEffects", has_effects)  # 向QML传递QtQuickEffects模块可用状态
         context.setContextProperty("themeManager", self.theme_manager) # 设置themeManager上下文属性
+        
+        # 注册QtCharts模块到QML引擎
+        if has_charts:
+            print("Qt Charts 模块已注册到QML引擎")
+        
+        # 注册QtQuickEffects模块到QML引擎
+        if has_effects:
+            print("QtQuickEffects 模块已注册到QML引擎")
         print("QML上下文设置完成")
         
         # 设置导入路径，确保QML可以找到组件
@@ -147,12 +165,14 @@ class MainApplication(QObject):
         
         # 加载主QML文件 - 使用相对路径
         try:
-            # 暂时使用简单的相对路径
-            qml_path = "ui/main.qml"
-            print(f"准备加载QML文件: {qml_path}")
+            # 使用相对于 main.py 的路径
+            base_dir = os.path.dirname(__file__)
+            qml_file_path = os.path.join(base_dir, "ui", "main.qml")
+            qml_url = QUrl.fromLocalFile(qml_file_path) # 转换为 QUrl
+            print(f"准备加载QML文件: {qml_url.toString()}")
             
             # 加载QML文件
-            self.engine.load(qml_path)
+            self.engine.load(qml_url)
             print("QML文件加载指令已发送")
             
             # 检查加载结果

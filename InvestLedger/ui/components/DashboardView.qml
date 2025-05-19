@@ -100,6 +100,8 @@ Item {
         ColumnLayout {
             anchors.centerIn: parent
             spacing: 15
+            Layout.preferredWidth: parent.width * 0.8 // Constrain width for better text wrapping
+            Layout.maximumWidth: 600 // Optional: prevent it from becoming too wide
 
             Image {
                 source: "qrc:/icons/empty-box.svg" // 假设有一个空状态图标
@@ -119,9 +121,10 @@ Item {
                 text: !userSelected ? qsTr("请先选择或创建一个用户以查看仪表盘。") : qsTr("仪表盘暂无数据")
                 font.pixelSize: 18
                 color: Qt.darker(theme.textColor, 1.3)
-                Layout.alignment: Qt.AlignHCenter
+                // Layout.alignment: Qt.AlignHCenter // horizontalAlignment is generally preferred for Text
                 wrapMode: Text.WordWrap
                 horizontalAlignment: Text.AlignHCenter
+                Layout.fillWidth: true // Ensure text uses available width in the layout cell
             }
 
             Text {

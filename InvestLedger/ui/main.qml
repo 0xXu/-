@@ -2,32 +2,566 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Window
-// 使用条件导入QtCharts
-import QtCharts 2.3 as Charts // 有QtCharts就导入，没有就忽略错误
-// 导入自定义组件
+import QtCharts
+import Qt5Compat.GraphicalEffects
+// Import custom components from the "components" directory
 import "components"
-// 导入对话框
-import "." as UI
+// Import dialogs from the current directory, though we're defining them here directly for clarity
+// import "." as UI // Not strictly needed as dialogs are defined in this file
+
 
 ApplicationWindow {
     id: mainWindow
-    visible: false // 初始不可见, 等待用户选择
+    visible: false // 初始设置为false，用户选择后再显示
     width: 1280
     height: 800
     title: qsTr("InvestLedger - 轻量个人投资记账程序") + " - v" + appVersion
-    
-    // 预算告警信息
+
+    // Application-wide properties
     property var budgetAlerts: []
-    // 是否显示预算告警
     property bool showBudgetAlert: budgetAlerts.length > 0
-    
-    // 工具栏组件
+    property bool userSelected: false // True after a user is successfully selected
+    property string currentUser: ""
+    property int currentPage: 0  // 0: Dashboard, 1: Transactions, 2: Charts, 3: Import/Export, 4: Settings
+
+    // Check if QtCharts module was successfully imported
+    property bool chartsAvailable: typeof Charts !== 'undefined'
+
+    // Theme manager instance
+    ThemeManager {
+        id: themeManagerInstance
+    }
+    property var theme: themeManagerInstance
+
+    // Theme color definitions, controlled by ThemeManager
+    // These will be updated once themeManagerInstance.loadTheme() is called
+    property color primaryColor: themeManagerInstance.primaryColor
+    property color accentColor: themeManagerInstance.accentColor
+    property color textColor: themeManagerInstance.textColor
+    property color bgColor: themeManagerInstance.backgroundColor
+    property color cardColor: themeManagerInstance.cardColor
+    property color profitColor: themeManagerInstance.profitColor
+    property color lossColor: themeManagerInstance.lossColor
+
+    // Dialog loader helper object
+    QtObject {
+        id: dialogLoader
+
+        // Functions to create and return dialog instances from dialogs.qml
+        // These assume dialogs.qml defines components like 'ImportDialog', 'ExportDialog', etc.
+        function loadDialog(dialogName) {
+            var component = Qt.createComponent("dialogs.qml");
+            if (component.status === Component.Ready) {
+                var dialogObj = component.createObject(mainWindow);
+                if (dialogObj && dialogObj[dialogName]) {
+                    return dialogObj[dialogName].createObject(mainWindow);
+                } else {
+                    console.error("Failed to load dialog '%1': Dialog object invalid.".arg(dialogName));
+                    return null;
+                }
+            } else {
+                console.error("Failed to load dialogs.qml component:", component.errorString());
+                return null;
+            }
+        }
+
+        function loadImportDialog() { return loadDialog("importDialog"); }
+        function loadExportDialog() { return loadDialog("exportDialog"); }
+        function loadSettingsDialog() { return loadDialog("settingsDialog"); }
+        function loadHelpDialog() { return loadDialog("helpDialog"); }
+    }
+
+    // Function to select a user and initialize the main application UI
+    function selectUser(username) {
+        try {
+            if (backend.selectUser(username)) {
+                userSelected = true;
+                currentUser = username;
+                theme.loadTheme(); // Load theme settings for the selected user
+                loadDashboard(); // Load the dashboard content
+                mainWindow.visible = true; // Make the main application window visible
+                
+                // 选择用户后检查更新
+                backend.checkForUpdates();
+            } else {
+                errorDialog.showError(qsTr("选择用户失败: 用户 '%1' 不存在或无法加载。").arg(username));
+            }
+        } catch (e) {
+            console.error("Error selecting user:", e);
+            errorDialog.showError(qsTr("选择用户时发生错误: ") + e);
+        }
+    }
+
+    // Function to navigate to the dashboard page
+    function loadDashboard() {
+        currentPage = 0;
+        // Additional dashboard specific loading logic can go here
+    }
+
+    // Lifecycle hook: executed after component creation
+    Component.onCompleted: {
+        // Load theme settings before showing any UI that depends on it
+        themeManagerInstance.loadTheme();
+        // 不要在这里设置mainWindow.visible为true，让用户选择界面先显示
+        // 用户选择后，selectUser函数会设置mainWindow.visible为true
+        
+        // 加载用户列表
+        var users = backend.getUsers();
+        userListModel.clear();
+        for (var i = 0; i < users.length; i++) {
+            userListModel.append({name: users[i].name});
+        }
+        if (userListModel.count > 0) {
+            userListView.currentIndex = 0;
+        }
+    }
+
+    // --- User Selection View ---
+    // This is the full-screen user selection view that appears at startup
+    Item {
+        id: userSelectView
+        anchors.fill: parent
+        visible: !userSelected // Only show when no user is selected
+
+        // Background with theme color
+        Rectangle {
+            anchors.fill: parent
+            color: theme.backgroundColor
+        }
+
+        // Main content container
+        Rectangle {
+            width: Math.min(parent.width * 0.8, 600)
+            height: Math.min(parent.height * 0.8, 600)
+            anchors.centerIn: parent
+            color: theme.cardColor
+            radius: 12
+            border.color: Qt.darker(theme.cardColor, 1.2)
+            border.width: 1
+
+            // Shadow effect
+            layer.enabled: true
+            layer.effect: DropShadow {
+                horizontalOffset: 3
+                verticalOffset: 3
+                radius: 8.0
+                color: "#40000000"
+            }
+
+            // Content layout
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 20
+                spacing: 20
+
+                // Header
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 60
+                    color: Qt.lighter(theme.primaryColor, 1.1)
+                    radius: 8
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: 10
+                        spacing: 4
+
+                        Label {
+                            text: qsTr("选择用户")
+                            font.pixelSize: 24
+                            font.bold: true
+                            color: "white"
+                            Layout.fillWidth: true
+                        }
+
+                        Label {
+                            text: qsTr("请选择一个用户配置文件，或创建一个新用户")
+                            font.pixelSize: 14
+                            color: "white"
+                            opacity: 0.8
+                            Layout.fillWidth: true
+                        }
+                    }
+                }
+
+                // User list
+                ListModel {
+                    id: userListModel
+                }
+
+                ListView {
+                    id: userListView
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    model: userListModel
+                    clip: true
+                    spacing: 8
+
+                    delegate: ItemDelegate {
+                        width: ListView.view.width
+                        height: 60
+                        text: model.name
+
+                        background: Rectangle {
+                            color: parent.pressed ? Qt.lighter(theme.primaryColor, 1.8) :
+                                   (parent.hovered ? Qt.lighter(theme.primaryColor, 1.9) :
+                                   (userListView.currentIndex === index ? Qt.lighter(theme.primaryColor, 1.5) : theme.backgroundColor))
+                            radius: 8
+                            border.color: userListView.currentIndex === index ? theme.primaryColor : "transparent"
+                            border.width: 1
+                            Behavior on color { ColorAnimation { duration: 150 } }
+                        }
+
+                        contentItem: RowLayout {
+                            spacing: 12
+
+                            Rectangle {
+                                width: 40
+                                height: 40
+                                radius: 20
+                                color: theme.primaryColor
+                                opacity: 0.8
+
+                                Label {
+                                    anchors.centerIn: parent
+                                    text: model.name.charAt(0).toUpperCase()
+                                    font.pixelSize: 18
+                                    font.bold: true
+                                    color: "white"
+                                }
+                            }
+
+                            Label {
+                                text: model.name
+                                font.pixelSize: 16
+                                color: theme.textColor
+                                Layout.fillWidth: true
+                            }
+                        }
+
+                        onClicked: {
+                            userListView.currentIndex = index;
+                        }
+
+                        onDoubleClicked: {
+                            if (userListView.currentIndex >= 0) {
+                                var username = userListModel.get(userListView.currentIndex).name;
+                                selectUser(username);
+                            }
+                        }
+                    }
+
+                    ScrollIndicator.vertical: ScrollIndicator { }
+
+                    // Empty state
+                    footer: Item {
+                        width: parent.width
+                        height: userListModel.count === 0 ? 100 : 0
+                        visible: userListModel.count === 0
+
+                        ColumnLayout {
+                            anchors.centerIn: parent
+                            spacing: 10
+
+                            Label {
+                                text: "🤔"
+                                font.pixelSize: 32
+                                Layout.alignment: Qt.AlignHCenter
+                            }
+
+                            Label {
+                                text: qsTr("没有可用用户")
+                                color: theme.textColor
+                                font.pixelSize: 16
+                                font.bold: true
+                                Layout.alignment: Qt.AlignHCenter
+                            }
+
+                            Label {
+                                text: qsTr("点击下方按钮创建新用户")
+                                color: theme.textColor
+                                font.pixelSize: 14
+                                opacity: 0.7
+                                Layout.alignment: Qt.AlignHCenter
+                            }
+                        }
+                    }
+                }
+
+                // Action buttons
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.margins: 10
+                    spacing: 10
+
+                    Item { Layout.fillWidth: true } // Spacer
+
+                    Button {
+                        text: qsTr("创建新用户")
+                        icon.name: "user-new"
+                        Layout.preferredWidth: 140
+                        Layout.preferredHeight: 40
+
+                        onClicked: {
+                            newUsernameField.text = "";
+                            newUserPopup.open();
+                        }
+
+                        background: Rectangle {
+                            color: theme.primaryColor
+                            radius: 8
+                            border.color: Qt.darker(theme.primaryColor, 1.1)
+                            border.width: 1
+                            opacity: parent.enabled ? 1.0 : 0.5
+                        }
+
+                        contentItem: Label {
+                            text: parent.text
+                            font.pixelSize: 14
+                            color: "white"
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                    }
+
+                    Button {
+                        text: qsTr("选择用户")
+                        highlighted: true
+                        enabled: userListModel.count > 0 && userListView.currentIndex >= 0
+                        Layout.preferredWidth: 140
+                        Layout.preferredHeight: 40
+
+                        onClicked: {
+                            if (userListView.currentIndex >= 0) {
+                                var username = userListModel.get(userListView.currentIndex).name;
+                                selectUser(username);
+                            } else {
+                                errorDialog.showError(qsTr("请选择一个用户"));
+                            }
+                        }
+
+                        background: Rectangle {
+                            color: theme.accentColor
+                            radius: 8
+                            border.color: Qt.darker(theme.accentColor, 1.1)
+                            border.width: 1
+                            opacity: parent.enabled ? 1.0 : 0.5
+                        }
+
+                        contentItem: Label {
+                            text: parent.text
+                            font.pixelSize: 14
+                            color: "white"
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                    }
+                }
+            }
+        }
+
+        // 用户选择视图已在主窗口的Component.onCompleted中初始化
+    } // End of userSelectView
+
+    // --- New User Creation Popup ---
+    Popup {
+        id: newUserPopup
+        width: 350
+        height: 200
+        anchors.centerIn: parent
+        modal: true
+        focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
+
+        background: Rectangle {
+            color: theme.cardColor
+            radius: 8
+            border.color: Qt.darker(theme.cardColor, 1.2)
+            border.width: 1
+            DropShadow { // Visual depth
+                anchors.fill: parent
+                horizontalOffset: 3
+                verticalOffset: 3
+                radius: 8
+                color: "#40000000"
+                source: parent
+            }
+        }
+
+        contentItem: ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 20
+            spacing: 15
+
+            Label {
+                text: qsTr("创建新用户")
+                font.pixelSize: 18
+                font.bold: true
+                color: theme.textColor
+                Layout.alignment: Qt.AlignHCenter
+            }
+
+            TextField {
+                id: newUsernameField
+                Layout.fillWidth: true
+                placeholderText: qsTr("输入用户名")
+                color: theme.textColor
+                background: Rectangle {
+                    color: theme.backgroundColor
+                    border.color: Qt.darker(theme.backgroundColor, 1.3)
+                    radius: 4
+                }
+                Keys.onReturnPressed: createUserButton.clicked() // Allow Enter to create
+                Keys.onEnterPressed: createUserButton.clicked()
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.alignment: Qt.AlignRight
+                spacing: 10
+
+                Button {
+                    text: qsTr("取消")
+                    flat: true
+                    onClicked: newUserPopup.close()
+                    palette.buttonText: theme.textColor // Use theme color for flat button text
+                }
+
+                Button {
+                    id: createUserButton
+                    text: qsTr("创建")
+                    highlighted: true
+                    onClicked: {
+                        var username = newUsernameField.text.trim();
+                        if (username) {
+                            try {
+                                if (backend.createUser(username)) {
+                                    // If user created successfully, select them
+                                    selectUser(username); // This will handle showing mainWindow and closing userSelectDialog
+                                    newUserPopup.close(); // Close this new user popup
+                                    // userSelectDialog.showDialog(); // No need to explicitly re-populate if selectUser closes it
+                                } else {
+                                    errorDialog.showError(qsTr("创建用户失败: 用户名可能已存在或无效。"));
+                                }
+                            } catch (e) {
+                                console.error("Error creating user:", e);
+                                errorDialog.showError(qsTr("创建用户时发生错误: ") + e);
+                            }
+                        } else {
+                            errorDialog.showError(qsTr("用户名不能为空。"));
+                        }
+                    }
+                    background: Rectangle {
+                        color: theme.primaryColor
+                        radius: 8
+                        border.color: Qt.darker(theme.primaryColor, 1.1)
+                        border.width: 1
+                        opacity: parent.enabled ? 1.0 : 0.5
+                        Behavior on color { ColorAnimation { duration: 150 } }
+                    }
+                    contentItem: Label { // Custom content item for thematic text color
+                        text: parent.text
+                        font: parent.font
+                        color: "white"
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                        anchors.margins: 6
+                    }
+                }
+            }
+        }
+    } // End of newUserPopup
+
+    // --- Global Error Dialog ---
+    Dialog {
+        id: errorDialog
+        title: qsTr("错误")
+        width: 300
+        height: 150
+        anchors.centerIn: parent
+        modal: true
+        closePolicy: Popup.CloseOnEscape
+
+        background: Rectangle { // Styling for error dialog
+            color: theme.cardColor
+            radius: 8
+            border.color: Qt.darker(theme.cardColor, 1.2)
+            border.width: 1
+            DropShadow {
+                anchors.fill: parent
+                horizontalOffset: 3
+                verticalOffset: 3
+                radius: 8
+                color: "#40000000"
+                source: parent
+            }
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 10
+            anchors.margins: 15 // Add anchors.margins
+
+            Text {
+                id: errorText
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                color: theme.textColor
+            }
+
+            Button {
+                text: qsTr("确定")
+                Layout.alignment: Qt.AlignRight
+                onClicked: errorDialog.close()
+                background: Rectangle {
+                    color: theme.accentColor
+                    radius: 8
+                    border.color: Qt.darker(theme.accentColor, 1.1)
+                    border.width: 1
+                    opacity: parent.enabled ? 1.0 : 0.5
+                    Behavior on color { ColorAnimation { duration: 150 } }
+                }
+                contentItem: Label {
+                    text: parent.text
+                    font: parent.font
+                    color: "white"
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+            }
+        }
+
+        function showError(message) {
+            errorText.text = message;
+            open();
+        }
+    }
+
+    // --- Application Window Header (ToolBar) ---
+    // This is the single, unified top bar for the application.
     header: ToolBar {
+        height: 60 // Fixed height for the toolbar
+        background: Rectangle {
+            color: primaryColor
+            implicitWidth: parent.width
+            implicitHeight: parent.height
+        }
+
         RowLayout {
             anchors.fill: parent
+            anchors.leftMargin: 10
+            anchors.rightMargin: 10
             spacing: 10
-            
-            // 撤销按钮
+
+            // Application Title
+            Text {
+                text: "InvestLedger"
+                color: "white"
+                font.pixelSize: 20
+                font.bold: true
+                verticalAlignment: Text.AlignVCenter
+            }
+
+            // Undo button
             Button {
                 id: undoButton
                 text: qsTr("撤销")
@@ -35,15 +569,50 @@ ApplicationWindow {
                 enabled: backend.canUndo
                 onClicked: {
                     if (backend.undo()) {
-                        // 刷新当前视图
                         backend.refreshCurrentView()
                     }
                 }
                 ToolTip.visible: hovered
                 ToolTip.text: qsTr("撤销上一步操作")
+                
+                // 美化按钮样式
+                background: Rectangle {
+                    color: undoButton.pressed ? Qt.darker(theme.accentColor, 1.2) :
+                           (undoButton.hovered ? Qt.lighter(theme.accentColor, 1.1) : "transparent")
+                    radius: 4
+                    border.color: undoButton.enabled ? theme.accentColor : "#cccccc"
+                    border.width: 1
+                    implicitHeight: 36
+                    implicitWidth: 80
+                }
+                
+                contentItem: Item {
+                    implicitWidth: undoRow.implicitWidth
+                    implicitHeight: undoRow.implicitHeight
+                    
+                    Row {
+                        id: undoRow
+                        anchors.centerIn: parent
+                        spacing: 5
+                        
+                        Text {
+                            text: "↩"
+                            font.pixelSize: 16
+                            color: undoButton.enabled ? "white" : "#cccccc"
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+                        
+                        Text {
+                            text: undoButton.text
+                            font.pixelSize: 14
+                            color: undoButton.enabled ? "white" : "#cccccc"
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+                    }
+                }
             }
-            
-            // 重做按钮
+
+            // Redo button
             Button {
                 id: redoButton
                 text: qsTr("重做")
@@ -51,742 +620,610 @@ ApplicationWindow {
                 enabled: backend.canRedo
                 onClicked: {
                     if (backend.redo()) {
-                        // 刷新当前视图
                         backend.refreshCurrentView()
                     }
                 }
                 ToolTip.visible: hovered
                 ToolTip.text: qsTr("重做上一步操作")
+                
+                // 美化按钮样式
+                background: Rectangle {
+                    color: redoButton.pressed ? Qt.darker(theme.accentColor, 1.2) :
+                           (redoButton.hovered ? Qt.lighter(theme.accentColor, 1.1) : "transparent")
+                    radius: 4
+                    border.color: redoButton.enabled ? theme.accentColor : "#cccccc"
+                    border.width: 1
+                    implicitHeight: 36
+                    implicitWidth: 80
+                }
+                
+                contentItem: Item {
+                    implicitWidth: redoRow.implicitWidth
+                    implicitHeight: redoRow.implicitHeight
+                    
+                    Row {
+                        id: redoRow
+                        anchors.centerIn: parent
+                        spacing: 5
+                        
+                        Text {
+                            text: "↪"
+                            font.pixelSize: 16
+                            color: redoButton.enabled ? "white" : "#cccccc"
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+                        
+                        Text {
+                            text: redoButton.text
+                            font.pixelSize: 14
+                            color: redoButton.enabled ? "white" : "#cccccc"
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+                    }
+                }
             }
-            
-            // 分隔符
+
+            // Separator line
             Rectangle {
                 width: 1
                 height: parent.height * 0.7
                 color: "#cccccc"
+                Layout.alignment: Qt.AlignVCenter
             }
-            
-            // 预算告警区域
+
+            // Budget Alert Area (fills remaining space if no other items stretch)
             Rectangle {
                 id: alertArea
                 visible: showBudgetAlert
-                color: "#fff8e1"  // 淡黄色背景
+                color: "#fff8e1"  // Light yellow background
                 border.color: "#ffca28"
                 border.width: 1
                 radius: 4
-                Layout.fillWidth: true
-                height: alertText.height + 16
-                
+                Layout.fillWidth: true // Allows it to expand
+                Layout.minimumWidth: 150 // Minimum width for the alert area
+                Layout.maximumWidth: 400 // Max width
+                height: alertText.implicitHeight + 16 // Dynamic height based on text content
+
                 RowLayout {
                     anchors.fill: parent
                     anchors.margins: 8
                     spacing: 8
-                    
-                    // 警告图标
+
+                    // Warning icon
                     Text {
                         text: "⚠️"
                         font.pixelSize: 18
+                        Layout.alignment: Qt.AlignVCenter
                     }
-                    
-                    // 警告文本
+
+                    // Warning text
                     Text {
                         id: alertText
                         text: budgetAlerts.length > 0 ? budgetAlerts[0].message : ""
                         Layout.fillWidth: true
                         wrapMode: Text.WordWrap
+                        color: "#c07e00" // Darker text for alert
+                        verticalAlignment: Text.AlignVCenter
                     }
-                    
-                    // 关闭按钮
+
+                    // Close button for alert
                     Button {
                         text: "×"
                         flat: true
+                        font.bold: true
+                        font.pixelSize: 16
                         onClicked: {
-                            // 移除当前显示的告警
                             if (budgetAlerts.length > 0) {
-                                budgetAlerts.shift()
-                                budgetAlerts = budgetAlerts  // 触发属性更新
+                                budgetAlerts.shift() // Remove the first alert
+                                budgetAlerts = budgetAlerts // Trigger property update
                             }
                         }
                     }
                 }
             }
-            
-            // 填充空间
+
+            // Filler item to push subsequent buttons to the right if alertArea isn't visible
             Item {
                 Layout.fillWidth: true
-                visible: !showBudgetAlert
-            }
-        }
-    }
-    
-    // 对话框组件加载器
-    QtObject {
-        id: dialogLoader
-        
-        // 加载导入对话框
-        function loadImportDialog() {
-            var component = Qt.createComponent("dialogs.qml");
-            if (component.status === Component.Ready) {
-                var dialogObj = component.createObject(mainWindow);
-                if (dialogObj && dialogObj.importDialog) {
-                    return dialogObj.importDialog.createObject(mainWindow);
-                } else {
-                    console.error("加载导入对话框失败: 对话框对象无效");
-                    return null;
-                }
-            } else {
-                console.error("加载对话框组件失败:", component.errorString());
-                return null;
-            }
-        }
-        
-        // 加载导出对话框
-        function loadExportDialog() {
-            var component = Qt.createComponent("dialogs.qml");
-            if (component.status === Component.Ready) {
-                var dialogObj = component.createObject(mainWindow);
-                if (dialogObj && dialogObj.exportDialog) {
-                    return dialogObj.exportDialog.createObject(mainWindow);
-                } else {
-                    console.error("加载导出对话框失败: 对话框对象无效");
-                    return null;
-                }
-            } else {
-                console.error("加载对话框组件失败:", component.errorString());
-                return null;
-            }
-        }
-        
-        // 加载设置对话框
-        function loadSettingsDialog() {
-            var component = Qt.createComponent("dialogs.qml");
-            if (component.status === Component.Ready) {
-                var dialogObj = component.createObject(mainWindow);
-                if (dialogObj && dialogObj.settingsDialog) {
-                    return dialogObj.settingsDialog.createObject(mainWindow);
-                } else {
-                    console.error("加载设置对话框失败: 对话框对象无效");
-                    return null;
-                }
-            } else {
-                console.error("加载对话框组件失败:", component.errorString());
-                return null;
-            }
-        }
-        
-        // 加载帮助对话框
-        function loadHelpDialog() {
-            var component = Qt.createComponent("dialogs.qml");
-            if (component.status === Component.Ready) {
-                var dialogObj = component.createObject(mainWindow);
-                if (dialogObj && dialogObj.helpDialog) {
-                    return dialogObj.helpDialog.createObject(mainWindow);
-                } else {
-                    console.error("加载帮助对话框失败: 对话框对象无效");
-                    return null;
-                }
-            } else {
-                console.error("加载对话框组件失败:", component.errorString());
-                return null;
-            }
-        }
-    }
-    
-    // 主题管理器
-    property ThemeManager theme: ThemeManager {}
-    
-    // 主题色定义 - 由主题管理器控制
-    property color primaryColor: theme.primaryColor
-    property color accentColor: theme.accentColor
-    property color textColor: theme.textColor
-    property color bgColor: theme.backgroundColor
-    property color cardColor: theme.cardColor
-    property color profitColor: theme.profitColor
-    property color lossColor: theme.lossColor
-    
-    // 当前状态
-    property bool userSelected: false
-    property string currentUser: ""
-    property int currentPage: 0  // 0: 仪表盘, 1: 交易列表, 2: 图表统计, 3: 导入导出
-    
-    // 图表功能可用性
-    property bool chartsAvailable: typeof hasCharts !== 'undefined' && hasCharts
-    
-    Component.onCompleted: {
-        // 默认显示用户选择对话框
-        // 确保在 mainWindow.visible = false 的情况下，对话框仍能正确显示和操作
-        if (!userSelected) { // 仅当没有用户被选择时显示
-            userSelectDialog.showDialog();
-        } else {
-            // 如果已有用户（例如通过某种方式自动登录），则直接显示主窗口
-            mainWindow.visible = true;
-        }
-    }
-    
-    function initializeApp() {
-        // 如果只有一个用户且不是首次启动，自动选择该用户
-        var users = backend.getUsers();
-        showUserSelectDialog();
-    }
-    
-    function selectUser(username) {
-        if (backend.selectUser(username)) {
-            userSelected = true;
-            currentUser = username;
-            // 加载用户主题设置
-            theme.loadTheme();
-            loadDashboard();
-        }
-    }
-    
-    function loadDashboard() {
-        // 加载仪表盘数据
-        currentPage = 0;
-    }
-    
-    // 当用户选择完成后显示主窗口
-    Connections {
-        target: userSelectDialog
-        function onUserSelectedSuccessfully() { // 自定义信号，在selectUser成功后发出
-            mainWindow.visible = true;
-        }
-        function onDialogClosedWithoutSelection() { // 如果对话框关闭但未选择用户
-            // Qt.quit(); // 例如，如果未选择用户则退出应用
-            // 或者保持主窗口不可见，等待用户通过其他方式触发选择 (例如 "切换用户" 按钮)
-        }
-    }
-
-    // 用户选择对话框
-    Dialog {
-        id: userSelectDialog
-        title: qsTr("选择或创建用户")
-        width: Math.min(mainWindow.width * 0.8, 450) // 响应式宽度
-        height: Math.min(mainWindow.height * 0.7, 350) // 响应式高度
-        anchors.centerIn: parent
-        modal: true
-        standardButtons: Dialog.NoButton // 移除标准按钮，使用自定义按钮
-        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent // 允许点击外部关闭
-
-        // 信号
-        signal userSelectedSuccessfully()
-        signal dialogClosedWithoutSelection()
-
-        // 背景和边框美化
-        background: Rectangle {
-            color: theme.cardColor // 使用主题颜色
-            radius: 8
-            border.color: Qt.darker(theme.cardColor, 1.2)
-            border.width: 1
-        }
-
-        // 动画效果
-        opacity: 0
-        transform: Scale { xScale: 0.9; yScale: 0.9; origin.x: userSelectDialog.width / 2; origin.y: userSelectDialog.height / 2 }
-        Behavior on opacity { NumberAnimation { duration: 250; easing.type: Easing.OutCubic } }
-        Behavior on transform { ScaleAnimator { duration: 250; easing.type: Easing.OutCubic } }
-
-        onOpened: {
-            opacity = 1;
-            transform.xScale = 1.0;
-            transform.yScale = 1.0;
-        }
-
-        onClosed: {
-            opacity = 0;
-            transform.xScale = 0.9;
-            transform.yScale = 0.9;
-            if (!userSelected) { // 如果关闭时没有选择用户
-                dialogClosedWithoutSelection();
-            }
-        }
-        header: Label { // 使用Label作为标题栏，更灵活
-            text: qsTr("选择用户")
-            font.pixelSize: 18
-            font.bold: true
-            color: theme.textColor
-            padding: 12
-            background: Rectangle {
-                color: Qt.lighter(theme.primaryColor, 1.1)
-                radius: 8
-                anchors.topFill: parent
-                height: parent.height
-                // 只圆角化顶部
-                border.color: theme.primaryColor
-                Rectangle { // 底部边框线
-                    anchors.bottom: parent.bottom
-                    width: parent.width
-                    height: 1
-                    color: Qt.darker(theme.primaryColor, 1.2)
-                }
-            }
-        }
-
-        contentItem: ColumnLayout {
-            anchors.fill: parent
-            anchors.topMargin: userSelectDialog.header ? userSelectDialog.header.height : 0 // 确保内容在header下方
-            spacing: 15
-            padding: 15
-
-            Label {
-                text: qsTr("请选择一个用户配置文件，或创建一个新用户。")
-                wrapMode: Text.WordWrap
-                Layout.fillWidth: true
-                color: theme.textColor
-                font.pixelSize: 13
+                visible: !showBudgetAlert // Only active if alert is not shown
             }
 
-            ListView {
-                id: userListView
-                Layout.fillWidth: true
-                Layout.preferredHeight: 150 // 设定一个合适的高度
-                Layout.minimumHeight: 100
-                clip: true // 裁剪内容
-                model: ListModel { id: userListModel }
-                ScrollBar.vertical: ScrollBar {}
-                delegate: ItemDelegate {
-                    width: parent.width
-                    height: 45
-                    padding: 8
-
-                    background: Rectangle {
-                        color: ListView.isCurrentItem ? Qt.tint(theme.primaryColor, Qt.rgba(1,1,1,0.2)) : (hovered ? Qt.tint(theme.cardColor, Qt.rgba(1,1,1,0.1)) : "transparent")
-                        radius: 4
-                        Behavior on color { ColorAnimation { duration: 150 } }
-                    }
-
-                    contentItem: Text {
-                        text: name
-                        anchors.verticalCenter: parent.verticalCenter
-                        font.pixelSize: 15
-                        color: ListView.isCurrentItem ? theme.textColor : theme.textColor // 保持文本颜色一致或根据主题调整
-                        elide: Text.ElideRight
-                    }
-
-                    onClicked: {
-                        selectUser(name);
-                        userSelectDialog.userSelectedSuccessfully() // 发出成功信号
-                        userSelectDialog.close();
-                    }
-                }
-            }
-
-            Button {
-                text: qsTr("创建新用户")
-                Layout.fillWidth: true
-                highlighted: true // 突出显示
-                icon.name: "user-new" // 添加图标
-                onClicked: newUserDialog.open()
-                palette.buttonText: theme.textColor // 确保按钮文本颜色与主题一致
-            }
-        }
-        function showDialog() {
-            var users = backend.getUsers();
-            userListModel.clear();
-            if (users.length === 0) {
-                // 如果没有用户，可以提示创建用户，或者直接打开新建用户对话框
-                // userListModel.append({name: "没有可用的用户", isPlaceholder: true});
-            } else {
-                for (var i = 0; i < users.length; i++) {
-                    userListModel.append(users[i]);
-                }
-            }
-            open();
-        }
-    }
-    
-    // 新建用户对话框
-    Dialog {
-        id: newUserDialog
-        title: "新建用户"
-        width: 300
-        height: 150
-        anchors.centerIn: parent
-        modal: true
-        closePolicy: Popup.CloseOnEscape
-        
-        contentItem: ColumnLayout {
-            spacing: 10
-            
+            // Current User Display
             Text {
-                text: "输入用户名："
+                text: userSelected ? qsTr("当前用户: ") + currentUser : qsTr("未选择用户")
+                color: "white"
                 font.pixelSize: 14
+                Layout.rightMargin: 10
+                verticalAlignment: Text.AlignVCenter
             }
-            
-            TextField {
-                id: newUsernameField
-                Layout.fillWidth: true
-                placeholderText: "用户名"
-            }
-            
-            RowLayout {
-                Layout.alignment: Qt.AlignRight
-                spacing: 10
-                
-                Button {
-                    text: "取消"
-                    onClicked: newUserDialog.close()
-                }
-                
-                Button {
-                    text: "创建"
-                    highlighted: true
-                    onClicked: {
-                        var username = newUsernameField.text.trim();
-                        if (username) {
-                            if (backend.createUser(username)) {
-                                selectUser(username);
-                                newUserDialog.close();
-                                userSelectDialog.userSelectedSuccessfully(); // 发出成功信号
-                                userSelectDialog.close();
-                            } else {
-                                errorDialog.showError("创建用户失败");
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    
-    // 错误对话框
-    Dialog {
-        id: errorDialog
-        title: "错误"
-        width: 300
-        height: 150
-        anchors.centerIn: parent
-        modal: true
-        closePolicy: Popup.CloseOnEscape
-        
-        contentItem: ColumnLayout {
-            Text {
-                id: errorText
-                Layout.fillWidth: true
-                wrapMode: Text.WordWrap
-            }
-            
+
+            // Switch User Button
             Button {
-                text: "确定"
-                Layout.alignment: Qt.AlignRight
-                onClicked: errorDialog.close()
+                id: switchUserButton
+                text: qsTr("切换用户")
+                visible: userSelected // Only visible if a user is currently selected
+                onClicked: {
+                    userSelected = false; // 重置用户选择状态
+                    currentUser = "";
+                }
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("切换当前活跃的用户")
+                
+                // 美化按钮样式
+                background: Rectangle {
+                    color: switchUserButton.pressed ? Qt.darker(theme.accentColor, 1.2) :
+                           (switchUserButton.hovered ? Qt.lighter(theme.accentColor, 1.1) : "transparent")
+                    radius: 8
+                    border.color: theme.accentColor
+                    border.width: 1
+                    implicitHeight: 36
+                    implicitWidth: 100
+                }
+                
+                contentItem: Item {
+                    implicitWidth: switchUserText.implicitWidth
+                    implicitHeight: switchUserText.implicitHeight
+                    
+                    Text {
+                        id: switchUserText
+                        text: switchUserButton.text
+                        font.pixelSize: 14
+                        color: "white"
+                        anchors.centerIn: parent
+                    }
+                }
+            }
+
+            // Check for Updates Button
+            Button {
+                id: checkUpdateButton
+                text: qsTr("检查更新")
+                onClicked: {
+                    if (backend.checkForUpdates()) { // Assuming backend provides this functionality
+                        updateDialog.open();
+                    } else {
+                        errorDialog.showError(qsTr("已是最新版本"));
+                    }
+                }
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("检查应用程序是否有新版本可用")
+                
+                // 美化按钮样式
+                background: Rectangle {
+                    color: checkUpdateButton.pressed ? Qt.darker(theme.accentColor, 1.2) :
+                           (checkUpdateButton.hovered ? Qt.lighter(theme.accentColor, 1.1) : "transparent")
+                    radius: 8
+                    border.color: theme.accentColor
+                    border.width: 1
+                    implicitHeight: 36
+                    implicitWidth: 100
+                }
+                
+                contentItem: Item {
+                    implicitWidth: checkUpdateText.implicitWidth
+                    implicitHeight: checkUpdateText.implicitHeight
+                    
+                    Text {
+                        id: checkUpdateText
+                        text: checkUpdateButton.text
+                        font.pixelSize: 14
+                        color: "white"
+                        anchors.centerIn: parent
+                    }
+                }
+            }
+
+            // Settings Button
+            Button {
+                id: settingsButton
+                text: qsTr("设置")
+                onClicked: {
+                    var dialog = dialogLoader.loadSettingsDialog();
+                    if (dialog) dialog.open();
+                }
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("打开应用程序设置")
+                
+                // 美化按钮样式
+                background: Rectangle {
+                    color: settingsButton.pressed ? Qt.darker(theme.accentColor, 1.2) :
+                           (settingsButton.hovered ? Qt.lighter(theme.accentColor, 1.1) : "transparent")
+                    radius: 8
+                    border.color: theme.accentColor
+                    border.width: 1
+                    implicitHeight: 36
+                    implicitWidth: 80
+                }
+                
+                contentItem: Item {
+                    implicitWidth: settingsText.implicitWidth
+                    implicitHeight: settingsText.implicitHeight
+                    
+                    Text {
+                        id: settingsText
+                        text: settingsButton.text
+                        font.pixelSize: 14
+                        color: "white"
+                        anchors.centerIn: parent
+                    }
+                }
+            }
+
+            // Theme Toggle Button
+            Button {
+                id: themeToggleButton
+                text: theme.isDarkTheme ? qsTr("切换到亮色") : qsTr("切换到暗色")
+                onClicked: {
+                    theme.saveTheme(theme.isDarkTheme ? "light" : "dark"); // Save the new theme preference
+                }
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("切换应用程序的亮/暗主题")
+                
+                // 美化按钮样式
+                background: Rectangle {
+                    color: themeToggleButton.pressed ? Qt.darker(theme.accentColor, 1.2) :
+                           (themeToggleButton.hovered ? Qt.lighter(theme.accentColor, 1.1) : "transparent")
+                    radius: 8
+                    border.color: theme.accentColor
+                    border.width: 1
+                    implicitHeight: 36
+                    implicitWidth: 140 
+                }
+                
+                contentItem: Item {
+                    implicitWidth: themeToggleText.implicitWidth
+                    implicitHeight: themeToggleText.implicitHeight
+                    
+                    Text {
+                        id: themeToggleText
+                        text: themeToggleButton.text
+                        font.pixelSize: 14
+                        color: "white"
+                        anchors.centerIn: parent
+                    }
+                }
+            }
+
+            // Help Button
+            Button {
+                id: helpButton
+                text: qsTr("帮助")
+                onClicked: {
+                    var dialog = dialogLoader.loadHelpDialog();
+                    if (dialog) dialog.open();
+                }
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("获取帮助信息")
+
+                // 美化按钮样式
+                background: Rectangle {
+                    color: helpButton.pressed ? Qt.darker(theme.accentColor, 1.2) :
+                           (helpButton.hovered ? Qt.lighter(theme.accentColor, 1.1) : "transparent")
+                    radius: 8
+                    border.color: theme.accentColor
+                    border.width: 1
+                    implicitHeight: 36
+                    implicitWidth: 80 
+                }
+                
+                contentItem: Item {
+                    implicitWidth: helpText.implicitWidth
+                    implicitHeight: helpText.implicitHeight
+                    
+                    Text {
+                        id: helpText
+                        text: helpButton.text
+                        font.pixelSize: 14
+                        color: "white"
+                        anchors.centerIn: parent
+                    }
+                }
             }
         }
-        
-        function showError(message) {
-            errorText.text = message;
-            open();
-        }
-    }
-    
-    // 主布局
+    } // End of ToolBar (header)
+
+    // --- Main Content Area of Application Window ---
+    // This ColumnLayout implicitly becomes the contentItem of ApplicationWindow,
+    // occupying space below the header and above the footer.
     ColumnLayout {
-        anchors.fill: parent
+        anchors.fill: parent // Fills the remaining space in ApplicationWindow
         spacing: 0
-        
-        // 顶部工具栏
-        Rectangle {
-            Layout.fillWidth: true
-            height: 60
-            color: primaryColor
-            
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: 10
-                anchors.rightMargin: 10
-                spacing: 10
-                
-                Text {
-                    text: "InvestLedger"
-                    color: "white"
-                    font.pixelSize: 20
-                    font.bold: true
-                }
-                
-                Item { Layout.fillWidth: true }
-                
-                Text {
-                    text: userSelected ? "当前用户: " + currentUser : "未选择用户"
-                    color: "white"
-                    font.pixelSize: 14
-                }
-                
-                Button {
-                    text: "切换用户"
-                    visible: userSelected
-                    onClicked: showUserSelectDialog()
-                }
-                
-                Button {
-                    text: "检查更新"
-                    onClicked: {
-                        if (backend.checkForUpdates()) {
-                            updateDialog.open();
-                        } else {
-                            errorDialog.showError("已是最新版本");
-                        }
-                    }
-                }
-                
-                Button {
-                    text: "设置"
-                    onClicked: {
-                        var dialog = dialogLoader.loadSettingsDialog();
-                        dialog.open();
-                    }
-                }
-                
-                // 主题切换按钮
-                Button {
-                    text: theme.isDarkTheme ? "切换到亮色" : "切换到暗色"
-                    onClicked: {
-                        theme.saveTheme(theme.isDarkTheme ? "light" : "dark");
-                    }
-                }
-                
-                Button {
-                    text: "帮助"
-                    onClicked: {
-                        var dialog = dialogLoader.loadHelpDialog();
-                        dialog.open();
-                    }
-                }
-            }
-        }
-        
-        // 内容区域
+
+        // SplitView for Navigation and Main Views
         SplitView {
             Layout.fillWidth: true
-            Layout.fillHeight: true
-            
-            // 左侧导航栏
+            Layout.fillHeight: true // Fills available height after header
+
+            // Left-side Navigation Bar
             Rectangle {
-                implicitWidth: 200
-                SplitView.minimumWidth: 150
-                SplitView.maximumWidth: 300
-                color: Qt.lighter(primaryColor, 1.5)
-                
+                implicitWidth: 200 // Default width
+                SplitView.minimumWidth: 150 // Minimum resizable width
+                SplitView.maximumWidth: 300 // Maximum resizable width
+                color: Qt.lighter(primaryColor, 1.5) // Lighter shade of primary color
+
                 ColumnLayout {
                     anchors.fill: parent
                     spacing: 0
-                    
+
+                    // Navigation Buttons (NavButton is a custom component)
                     NavButton {
-                        text: "仪表盘"
+                        text: qsTr("仪表盘")
                         iconName: "dashboard"
                         selected: currentPage === 0
                         onClicked: currentPage = 0
                     }
-                    
+
                     NavButton {
-                        text: "交易列表"
+                        text: qsTr("交易列表")
                         iconName: "list"
                         selected: currentPage === 1
                         onClicked: currentPage = 1
                     }
-                    
+
                     NavButton {
-                        text: "统计图表"
+                        text: qsTr("统计图表")
                         iconName: "chart"
                         selected: currentPage === 2
                         onClicked: currentPage = 2
                     }
-                    
+
                     NavButton {
-                        text: "导入导出"
+                        text: qsTr("导入导出")
                         iconName: "import"
                         selected: currentPage === 3
                         onClicked: currentPage = 3
                     }
-                    
-                    Item { Layout.fillHeight: true }
-                    
+
+                    Item { Layout.fillHeight: true } // Filler to push "Settings" to bottom
+
                     NavButton {
-                        text: "设置"
+                        text: qsTr("设置")
                         iconName: "settings"
                         selected: currentPage === 4
                         onClicked: currentPage = 4
                     }
                 }
             }
-            
-            // 主内容区
+
+            // Main Content Display Area
             Rectangle {
-                SplitView.fillWidth: true
-                color: bgColor
-                
+                SplitView.fillWidth: true // Takes up remaining width in SplitView
+                color: bgColor // Background color from theme
+
+                // StackLayout to switch between different views (Dashboard, Transactions, etc.)
                 StackLayout {
                     anchors.fill: parent
-                    anchors.margins: 10
-                    currentIndex: currentPage
-                    
-                    // 仪表盘页面
+                    anchors.margins: 10 // anchors.margins around the content
+                    currentIndex: currentPage // Controls which item is visible
+
+                    // Dashboard View
                     Item {
-                        DashboardView {}
+                        DashboardView {} // Assuming DashboardView.qml exists
                     }
-                    
-                    // 交易列表页面
+
+                    // Transaction List View
                     Item {
-                        TransactionListView {}
+                        TransactionListView {} // Assuming TransactionListView.qml exists
                     }
-                    
-                    // 统计图表页面
+
+                    // Chart Statistics View
                     Item {
+                        // Loader to conditionally load ChartView.qml
                         Loader {
                             anchors.fill: parent
+                            // Load ChartView only if QtCharts module is available
                             source: chartsAvailable ? "components/ChartView.qml" : ""
-                            
+
+                            // Message displayed if QtCharts is not available
                             Text {
                                 anchors.centerIn: parent
-                                text: chartsAvailable ? "" : "图表功能需要Qt Charts模块支持"
+                                text: chartsAvailable ? "" : qsTr("图表功能需要Qt Charts模块支持")
                                 font.pixelSize: 18
                                 color: "gray"
                                 visible: !chartsAvailable
                             }
                         }
                     }
-                    
-                    // 导入导出页面
+
+                    // Import/Export Page
                     Item {
                         ColumnLayout {
                             anchors.fill: parent
                             spacing: 20
-                            
+                            anchors.margins: 20 // Add anchors.margins for this page
+
                             Text {
-                                text: "数据导入导出"
+                                text: qsTr("数据导入导出")
                                 font.pixelSize: 24
                                 font.bold: true
+                                color: theme.textColor
                             }
-                            
+
                             Rectangle {
                                 Layout.fillWidth: true
                                 height: 120
                                 color: cardColor
                                 radius: 5
-                                
+                                DropShadow { anchors.fill: parent; horizontalOffset: 2; verticalOffset: 2; radius: 5; color: "#20000000"; source: parent }
+
                                 RowLayout {
                                     anchors.centerIn: parent
                                     spacing: 40
-                                    
+
                                     Button {
-                                        text: "导入数据"
+                                        text: qsTr("导入数据")
                                         icon.name: "import"
                                         onClicked: {
                                             var dialog = dialogLoader.loadImportDialog();
-                                            dialog.open();
+                                            if (dialog) dialog.open();
                                         }
                                     }
-                                    
+
                                     Button {
-                                        text: "导出数据"
+                                        text: qsTr("导出数据")
                                         icon.name: "export"
                                         onClicked: {
                                             var dialog = dialogLoader.loadExportDialog();
-                                            dialog.open();
+                                            if (dialog) dialog.open();
                                         }
                                     }
                                 }
                             }
-                            
-                            Item { Layout.fillHeight: true }
+                            Item { Layout.fillHeight: true } // Filler item
                         }
                     }
-                    
-                    // 设置页面
+
+                    // Settings View
                     Item {
-                        SettingsView {}
+                        SettingsView {} // Assuming SettingsView.qml exists
                     }
                 }
             }
         }
-        
-        // 底部状态栏
+
+        // --- Bottom Status Bar ---
         Rectangle {
             Layout.fillWidth: true
             height: 30
-            color: Qt.darker(primaryColor, 1.2)
-            
+            color: Qt.darker(primaryColor, 1.2) // Darker shade of primary color for footer
+
             RowLayout {
                 anchors.fill: parent
                 anchors.leftMargin: 10
                 anchors.rightMargin: 10
-                
+                Layout.alignment: Qt.AlignVCenter // Align items vertically in center
+
                 Text {
-                    text: "InvestLedger v" + appVersion
+                    text: qsTr("InvestLedger v") + appVersion // Display app version
                     color: "white"
                     font.pixelSize: 12
+                    verticalAlignment: Text.AlignVCenter
                 }
-                
-                Item { Layout.fillWidth: true }
-                
+
+                Item { Layout.fillWidth: true } // Filler to push copyright to right
+
                 Text {
                     text: "©2023"
                     color: "white"
                     font.pixelSize: 12
+                    verticalAlignment: Text.AlignVCenter
                 }
             }
         }
-    }
-    
-    // 更新对话框
+    } // End of main content ColumnLayout
+
+    // --- Update Notification Dialog ---
     Dialog {
         id: updateDialog
-        title: "发现新版本"
+        title: qsTr("发现新版本")
         width: 400
         height: 200
         anchors.centerIn: parent
         modal: true
         closePolicy: Popup.CloseOnEscape
-        
+
+        background: Rectangle { // Styling for update dialog
+            color: theme.cardColor
+            radius: 8
+            border.color: Qt.darker(theme.cardColor, 1.2)
+            border.width: 1
+            DropShadow {
+                anchors.fill: parent
+                horizontalOffset: 3
+                verticalOffset: 3
+                radius: 8
+                color: "#40000000"
+                source: parent
+            }
+        }
+
         contentItem: ColumnLayout {
             spacing: 10
-            
+            anchors.margins: 15 // Add anchors.margins
+
             Text {
-                text: "发现新版本，是否立即更新？"
+                text: qsTr("发现新版本，是否立即更新？")
                 font.pixelSize: 16
                 Layout.fillWidth: true
+                color: theme.textColor
             }
-            
+
             CheckBox {
                 id: autoRestartCheckbox
-                text: "更新后自动重启"
+                text: qsTr("更新后自动重启")
                 checked: true
+                Layout.alignment: Qt.AlignLeft
+                contentItem: Text { // Custom content for thematic checkbox text
+                    text: autoRestartCheckbox.text
+                    font: autoRestartCheckbox.font
+                    color: theme.textColor
+                }
             }
-            
+
             RowLayout {
                 Layout.alignment: Qt.AlignRight
                 spacing: 10
-                
+
                 Button {
-                    text: "稍后"
+                    text: qsTr("稍后")
                     onClicked: updateDialog.close()
+                    background: Rectangle { // Styling for standard button
+                        color: theme.backgroundColor
+                        radius: 4
+                        border.color: Qt.darker(theme.backgroundColor, 1.3)
+                        border.width: 1
+                        opacity: parent.enabled ? 1.0 : 0.5
+                        Behavior on color { ColorAnimation { duration: 150 } }
+                    }
+                    contentItem: Label {
+                        text: parent.text
+                        font: parent.font
+                        color: theme.textColor
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
                 }
-                
+
                 Button {
-                    text: "立即更新"
+                    text: qsTr("立即更新")
                     highlighted: true
                     onClicked: {
-                        backend.downloadUpdate(autoRestartCheckbox.checked);
+                        backend.downloadUpdate(autoRestartCheckbox.checked); // Assuming backend handles download
                         updateDialog.close();
+                    }
+                    background: Rectangle { // Styling for highlighted button
+                        color: theme.primaryColor
+                        radius: 4
+                        border.color: Qt.darker(theme.primaryColor, 1.1)
+                        border.width: 1
+                        opacity: parent.enabled ? 1.0 : 0.5
+                        Behavior on color { ColorAnimation { duration: 150 } }
+                    }
+                    contentItem: Label {
+                        text: parent.text
+                        font: parent.font
+                        color: "white"
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
                     }
                 }
             }
         }
     }
-    
-    // 全局信号处理
+
+    // --- Global Backend Signal Connections ---
     Connections {
-        target: backend
-        
+        target: backend // Assuming 'backend' is a C++ object exposed to QML
+
+        // Connect to an error signal from the backend
         function onErrorOccurred(message) {
             errorDialog.showError(message);
         }
-        
+
+        // Connect to an update available signal from the backend
         function onUpdateAvailable(version, notes) {
-            updateDialog.open();
+            updateDialog.open(); // Opens the update dialog when a new version is detected
+            // 'version' and 'notes' parameters are available if you want to display them in the dialog.
         }
-    }
-    
-    // 显示用户选择对话框
-    function showUserSelectDialog() {
-        userSelectDialog.showDialog();
     }
 }
