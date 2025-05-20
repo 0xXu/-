@@ -15,6 +15,12 @@ Window {
     property var mainWindow
     property var theme
     
+    // 主题颜色属性
+    property color lossColor: theme ? theme.lossColor : "#f44336" // 使用默认红色作为删除按钮颜色
+    
+    // 定义信号
+    signal userSelected(string username)
+    
     // 错误对话框实例
     property var errorDialog
 
@@ -153,10 +159,10 @@ Window {
                                 width: 40
                                 height: 40
                                 radius: 20
-                                color: theme ? theme.primaryColor : "#2196F3"
+                                color: theme.primaryColor
                                 opacity: 0.8
 
-                                Text {
+                                Label {
                                     anchors.centerIn: parent
                                     text: model.name.charAt(0).toUpperCase()
                                     font.pixelSize: 18
@@ -165,11 +171,46 @@ Window {
                                 }
                             }
 
-                            Text {
+                            Label {
                                 text: model.name
                                 font.pixelSize: 16
-                                color: theme ? theme.textColor : "#333333"
+                                color: theme.textColor
                                 Layout.fillWidth: true
+                            }
+                            
+                            // 删除用户按钮
+                            Button {
+                                id: deleteUserButton
+                                icon.name: "delete"
+                                implicitWidth: 30
+                                implicitHeight: 30
+                                visible: !model.name.startsWith("demo") // 示例用户不能删除
+                                
+                                background: Rectangle {
+                                    color: deleteUserButton.pressed ? Qt.darker(lossColor, 1.2) :
+                                           (deleteUserButton.hovered ? Qt.lighter(lossColor, 1.1) : "transparent")
+                                    radius: 4
+                                }
+                                
+                                contentItem: Text {
+                                    text: "🗑️"
+                                    font.pixelSize: 14
+                                    color: deleteUserButton.hovered ? "white" : "#ff5252"
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+                                
+                                onClicked: function(mouse) {
+                                    // 防止冒泡触发父项的点击事件
+                                    mouse.accepted = true;
+                                    // 显示确认对话框
+                                    deleteConfirmDialog.userName = model.name;
+                                    deleteConfirmDialog.open();
+                                }
+                                
+                                // 提示文本
+                                ToolTip.visible: hovered
+                                ToolTip.text: qsTr("删除此用户")
                             }
                         }
 
@@ -180,9 +221,8 @@ Window {
                         onDoubleClicked: {
                             if (userListView.currentIndex >= 0) {
                                 var username = userListModel.get(userListView.currentIndex).name;
-                                if (mainWindow) {
-                                    mainWindow.selectUser(username);
-                                }
+                                // 发出用户选择信号
+                                userSelected(username);
                             }
                         }
                     }
@@ -234,23 +274,23 @@ Window {
                     Button {
                         text: qsTr("刷新列表")
                         icon.name: "refresh"
+                        implicitHeight: 40
+                        implicitWidth: 120
                         onClicked: loadUserList()
                         
                         background: Rectangle {
-                            color: parent.pressed ? (theme ? Qt.darker(theme.backgroundColor, 1.2) : "#E0E0E0") :
-                                  (parent.hovered ? (theme ? Qt.lighter(theme.backgroundColor, 1.1) : "#F5F5F5") : 
-                                  (theme ? theme.backgroundColor : "#FAFAFA"))
+                            color: parent.pressed ? Qt.darker(theme.backgroundColor, 1.2) :
+                                  (parent.hovered ? Qt.lighter(theme.backgroundColor, 1.1) : 
+                                  theme.backgroundColor)
                             radius: 8
-                            border.color: theme ? Qt.darker(theme.backgroundColor, 1.3) : "#E0E0E0"
+                            border.color: Qt.darker(theme.backgroundColor, 1.3)
                             border.width: 1
-                            implicitHeight: 40
-                            implicitWidth: 120
                         }
                         
                         contentItem: Text {
                             text: parent.text
                             font.pixelSize: 14
-                            color: theme ? theme.textColor : "#424242"
+                            color: theme.textColor
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
                         }
@@ -259,6 +299,8 @@ Window {
                     Button {
                         text: qsTr("创建新用户")
                         icon.name: "user-new"
+                        implicitHeight: 40
+                        implicitWidth: 140
                         
                         onClicked: {
                             newUsernameField.text = "";
@@ -272,8 +314,8 @@ Window {
                             radius: 8
                             border.color: theme ? Qt.darker(theme.primaryColor, 1.1) : "#1E88E5"
                             border.width: 1
-                            implicitHeight: 40
-                            implicitWidth: 140
+                            opacity: parent.enabled ? 1.0 : 0.5
+                            Behavior on color { ColorAnimation { duration: 150 } }
                         }
                         
                         contentItem: Text {
@@ -289,28 +331,16 @@ Window {
                         text: qsTr("选择用户")
                         highlighted: true
                         enabled: userListModel.count > 0 && userListView.currentIndex >= 0
-                        
-                        onClicked: {
-                            if (userListView.currentIndex >= 0) {
-                                var username = userListModel.get(userListView.currentIndex).name;
-                                if (mainWindow) {
-                                    mainWindow.selectUser(username);
-                                }
-                            } else if (errorDialog) {
-                                errorDialog.showError(qsTr("请选择一个用户"));
-                            }
-                        }
+                        implicitHeight: 40
+                        implicitWidth: 140
                         
                         background: Rectangle {
-                            color: parent.pressed ? (theme ? Qt.darker(theme.accentColor, 1.2) : "#00897B") :
-                                  (parent.hovered ? (theme ? Qt.lighter(theme.accentColor, 1.1) : "#26A69A") : 
-                                  (theme ? theme.accentColor : "#009688"))
+                            color: parent.pressed ? Qt.darker(theme.accentColor, 1.2) :
+                                  (parent.hovered ? Qt.lighter(theme.accentColor, 1.1) : 
+                                  theme.accentColor)
                             radius: 8
-                            border.color: theme ? Qt.darker(theme.accentColor, 1.1) : "#00796B"
+                            border.color: Qt.darker(theme.accentColor, 1.1)
                             border.width: 1
-                            opacity: parent.enabled ? 1.0 : 0.5
-                            implicitHeight: 40
-                            implicitWidth: 140
                         }
                         
                         contentItem: Text {
@@ -319,6 +349,16 @@ Window {
                             color: "white"
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
+                        }
+                        
+                        onClicked: {
+                            if (userListView.currentIndex >= 0) {
+                                var username = userListModel.get(userListView.currentIndex).name;
+                                // 发出用户选择信号
+                                userSelected(username);
+                            } else {
+                                errorDialog.showError(qsTr("请选择一个用户"));
+                            }
                         }
                     }
                 }
@@ -420,21 +460,17 @@ Window {
                         if (username) {
                             try {
                                 if (backend.createUser(username)) {
-                                    // 如果用户创建成功，选择该用户
-                                    if (mainWindow) {
-                                        mainWindow.selectUser(username);
-                                    }
+                                    // 创建成功后选择新用户
+                                    userSelected(username);
                                     newUserPopup.close();
-                                } else if (errorDialog) {
+                                } else {
                                     errorDialog.showError(qsTr("创建用户失败: 用户名可能已存在或无效。"));
                                 }
                             } catch (e) {
                                 console.error("Error creating user:", e);
-                                if (errorDialog) {
-                                    errorDialog.showError(qsTr("创建用户时发生错误: ") + e);
-                                }
+                                errorDialog.showError(qsTr("创建用户时发生错误: ") + e);
                             }
-                        } else if (errorDialog) {
+                        } else {
                             errorDialog.showError(qsTr("用户名不能为空。"));
                         }
                     }
@@ -456,6 +492,158 @@ Window {
                         color: "white"
                         horizontalAlignment: Text.AlignHCenter
                         verticalAlignment: Text.AlignVCenter
+                    }
+                }
+            }
+        }
+    }
+    
+    // 错误对话框
+    Dialog {
+        id: errorDialog
+        title: qsTr("错误")
+        width: 300
+        height: 150
+        anchors.centerIn: parent
+        modal: true
+        closePolicy: Popup.CloseOnEscape
+
+        // 样式美化
+        background: Rectangle {
+            color: theme.cardColor
+            radius: 8
+            border.color: Qt.darker(theme.cardColor, 1.2)
+            border.width: 1
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 10
+            
+            Text {
+                id: errorText
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                color: theme.textColor
+            }
+            
+            Button {
+                text: qsTr("确定")
+                Layout.alignment: Qt.AlignRight
+                onClicked: errorDialog.close()
+                
+                background: Rectangle {
+                    color: theme.accentColor
+                    radius: 8
+                    border.color: Qt.darker(theme.accentColor, 1.1)
+                    border.width: 1
+                }
+                
+                contentItem: Text {
+                    text: parent.text
+                    color: "white"
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+            }
+        }
+        
+        function showError(message) {
+            errorText.text = message;
+            open();
+        }
+    }
+    
+    // 删除用户确认对话框
+    Dialog {
+        id: deleteConfirmDialog
+        title: qsTr("确认删除")
+        width: 350
+        height: 180
+        anchors.centerIn: parent
+        modal: true
+        closePolicy: Popup.CloseOnEscape
+        
+        property string userName: ""
+        
+        // 样式美化
+        background: Rectangle {
+            color: theme.cardColor
+            radius: 8
+            border.color: Qt.darker(theme.cardColor, 1.2)
+            border.width: 1
+        }
+        
+        contentItem: ColumnLayout {
+            spacing: 20
+            
+            Text {
+                text: qsTr("确定要删除用户 '%1' 吗？").arg(deleteConfirmDialog.userName)
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                color: theme.textColor
+            }
+            
+            Text {
+                text: qsTr("此操作将永久删除该用户的所有数据，且不可恢复！")
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                color: "#E53935"  // 警告色
+                font.bold: true
+            }
+            
+            RowLayout {
+                Layout.alignment: Qt.AlignRight
+                spacing: 10
+                
+                Button {
+                    text: qsTr("取消")
+                    onClicked: deleteConfirmDialog.close()
+                    
+                    background: Rectangle {
+                        color: theme.backgroundColor
+                        radius: 8
+                        border.color: Qt.darker(theme.backgroundColor, 1.3)
+                        border.width: 1
+                    }
+                    
+                    contentItem: Text {
+                        text: parent.text
+                        color: theme.textColor
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                }
+                
+                Button {
+                    text: qsTr("删除")
+                    
+                    background: Rectangle {
+                        color: "#E53935"  // 删除按钮用红色
+                        radius: 8
+                        border.color: Qt.darker("#E53935", 1.1)
+                        border.width: 1
+                    }
+                    
+                    contentItem: Text {
+                        text: parent.text
+                        color: "white"
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                    
+                    onClicked: {
+                        try {
+                            if (backend.deleteUser(deleteConfirmDialog.userName)) {
+                                // 删除成功后重新加载用户列表
+                                loadUserList();
+                                deleteConfirmDialog.close();
+                            } else {
+                                errorDialog.showError(qsTr("删除用户失败: 无法删除用户 '%1'").arg(deleteConfirmDialog.userName));
+                            }
+                        } catch (e) {
+                            console.error("Error deleting user:", e);
+                            errorDialog.showError(qsTr("删除用户时发生错误: ") + e);
+                        }
                     }
                 }
             }

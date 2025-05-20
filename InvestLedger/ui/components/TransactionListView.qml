@@ -118,45 +118,78 @@ Item {
     Rectangle {
         id: emptyStateOverlay
         anchors.fill: parent
-        color: Qt.rgba(0,0,0,0.02) // 轻微背景，与内容区分
+        color: Qt.rgba(theme.backgroundColor.r, theme.backgroundColor.g, theme.backgroundColor.b, 0.95) // 设置与背景相近的颜色
         visible: !hasData // 初始根据是否有数据决定
         z: 1 // 确保在内容之上
 
         ColumnLayout {
             anchors.centerIn: parent
             spacing: 15
+            width: parent.width * 0.8 // 控制宽度，确保文本换行
+            visible: userSelected // 仅当用户已选择时显示此消息
 
-            Image {
-                source: "qrc:/icons/empty-list.svg" // 确保此图标存在于qrc中
+            Text {
+                text: "📄"
+                font.pixelSize: 64
                 Layout.alignment: Qt.AlignHCenter
-                width: 128
-                height: 128
-                fillMode: Image.PreserveAspectFit
-                //备用文本图标
-                // Text {
-                //     text: "📄"
-                //     font.pixelSize: 64
-                //     Layout.alignment: Qt.AlignHCenter
-                // }
             }
 
             Text {
-                text: !userSelected ? qsTr("请先选择一个用户以查看交易记录。") : qsTr("暂无交易记录")
+                text: qsTr("暂无交易记录")
                 font.pixelSize: 18
-                color: Qt.darker(theme.textColor, 1.3)
+                font.bold: true
+                color: theme.textColor
                 Layout.alignment: Qt.AlignHCenter
-                wrapMode: Text.WordWrap
                 horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
             }
 
             Text {
-                visible: userSelected && !hasData // 仅当已选择用户但无数据时显示
                 text: qsTr("尝试添加一些交易，或调整上方的筛选条件。")
                 font.pixelSize: 14
-                color: Qt.darker(theme.textColor, 1.5)
+                color: Qt.darker(theme.textColor, 1.3)
+                opacity: 0.8
                 Layout.alignment: Qt.AlignHCenter
-                wrapMode: Text.WordWrap
                 horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+        }
+        
+        // 未选择用户时显示的提示信息
+        ColumnLayout {
+            anchors.centerIn: parent
+            spacing: 15
+            width: parent.width * 0.8
+            visible: !userSelected // 仅当用户未选择时显示此消息
+
+            Text {
+                text: "👤"
+                font.pixelSize: 64
+                Layout.alignment: Qt.AlignHCenter
+            }
+
+            Text {
+                text: qsTr("请先选择或创建一个用户")
+                font.pixelSize: 18
+                font.bold: true
+                color: theme.textColor
+                Layout.alignment: Qt.AlignHCenter
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+
+            Text {
+                text: qsTr("选择用户后才能查看交易记录")
+                font.pixelSize: 14
+                color: Qt.darker(theme.textColor, 1.3)
+                opacity: 0.8
+                Layout.alignment: Qt.AlignHCenter
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
             }
         }
     }

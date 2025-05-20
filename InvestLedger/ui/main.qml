@@ -107,6 +107,7 @@ ApplicationWindow {
                     
                     // 完成加载后显示主窗口
                     mainWindow.visible = true;
+                    console.log("主窗口设置为可见: visible =", mainWindow.visible);
                 } else {
                     errorDialog.showError(qsTr("选择用户失败: 用户 '%1' 不存在或无法加载。").arg(username));
                 }
@@ -793,152 +794,6 @@ ApplicationWindow {
                     }
                 }
             }
-
-            // Check for Updates Button
-            Button {
-                id: checkUpdateButton
-                text: qsTr("检查更新")
-                onClicked: {
-                    if (backend.checkForUpdates()) { // Assuming backend provides this functionality
-                        updateDialog.open();
-                    } else {
-                        errorDialog.showError(qsTr("已是最新版本"));
-                    }
-                }
-                ToolTip.visible: hovered
-                ToolTip.text: qsTr("检查应用程序是否有新版本可用")
-                
-                // 美化按钮样式
-                background: Rectangle {
-                    color: checkUpdateButton.pressed ? Qt.darker(theme.accentColor, 1.2) :
-                           (checkUpdateButton.hovered ? Qt.lighter(theme.accentColor, 1.1) : "transparent")
-                    radius: 8
-                    border.color: theme.accentColor
-                    border.width: 1
-                    implicitHeight: 36
-                    implicitWidth: 100
-                }
-                
-                contentItem: Item {
-                    implicitWidth: checkUpdateText.implicitWidth
-                    implicitHeight: checkUpdateText.implicitHeight
-                    
-                    Text {
-                        id: checkUpdateText
-                        text: checkUpdateButton.text
-                        font.pixelSize: 14
-                        color: "white"
-                        anchors.centerIn: parent
-                    }
-                }
-            }
-
-            // Settings Button
-            Button {
-                id: settingsButton
-                text: qsTr("设置")
-                onClicked: {
-                    var dialog = dialogLoader.loadSettingsDialog();
-                    if (dialog) dialog.open();
-                }
-                ToolTip.visible: hovered
-                ToolTip.text: qsTr("打开应用程序设置")
-                
-                // 美化按钮样式
-                background: Rectangle {
-                    color: settingsButton.pressed ? Qt.darker(theme.accentColor, 1.2) :
-                           (settingsButton.hovered ? Qt.lighter(theme.accentColor, 1.1) : "transparent")
-                    radius: 8
-                    border.color: theme.accentColor
-                    border.width: 1
-                    implicitHeight: 36
-                    implicitWidth: 80
-                }
-                
-                contentItem: Item {
-                    implicitWidth: settingsText.implicitWidth
-                    implicitHeight: settingsText.implicitHeight
-                    
-                    Text {
-                        id: settingsText
-                        text: settingsButton.text
-                        font.pixelSize: 14
-                        color: "white"
-                        anchors.centerIn: parent
-                    }
-                }
-            }
-
-            // Theme Toggle Button
-            Button {
-                id: themeToggleButton
-                text: theme.isDarkTheme ? qsTr("切换到亮色") : qsTr("切换到暗色")
-                onClicked: {
-                    theme.saveTheme(theme.isDarkTheme ? "light" : "dark"); // Save the new theme preference
-                }
-                ToolTip.visible: hovered
-                ToolTip.text: qsTr("切换应用程序的亮/暗主题")
-                
-                // 美化按钮样式
-                background: Rectangle {
-                    color: themeToggleButton.pressed ? Qt.darker(theme.accentColor, 1.2) :
-                           (themeToggleButton.hovered ? Qt.lighter(theme.accentColor, 1.1) : "transparent")
-                    radius: 8
-                    border.color: theme.accentColor
-                    border.width: 1
-                    implicitHeight: 36
-                    implicitWidth: 140 
-                }
-                
-                contentItem: Item {
-                    implicitWidth: themeToggleText.implicitWidth
-                    implicitHeight: themeToggleText.implicitHeight
-                    
-                    Text {
-                        id: themeToggleText
-                        text: themeToggleButton.text
-                        font.pixelSize: 14
-                        color: "white"
-                        anchors.centerIn: parent
-                    }
-                }
-            }
-
-            // Help Button
-            Button {
-                id: helpButton
-                text: qsTr("帮助")
-                onClicked: {
-                    var dialog = dialogLoader.loadHelpDialog();
-                    if (dialog) dialog.open();
-                }
-                ToolTip.visible: hovered
-                ToolTip.text: qsTr("获取帮助信息")
-
-                // 美化按钮样式
-                background: Rectangle {
-                    color: helpButton.pressed ? Qt.darker(theme.accentColor, 1.2) :
-                           (helpButton.hovered ? Qt.lighter(theme.accentColor, 1.1) : "transparent")
-                    radius: 8
-                    border.color: theme.accentColor
-                    border.width: 1
-                    implicitHeight: 36
-                    implicitWidth: 80 
-                }
-                
-                contentItem: Item {
-                    implicitWidth: helpText.implicitWidth
-                    implicitHeight: helpText.implicitHeight
-                    
-                    Text {
-                        id: helpText
-                        text: helpButton.text
-                        font.pixelSize: 14
-                        color: "white"
-                        anchors.centerIn: parent
-                    }
-                }
-            }
         }
     } // End of ToolBar (header)
 
@@ -1044,12 +899,18 @@ ApplicationWindow {
 
                     // Dashboard View
                     Item {
-                        DashboardView {} // Assuming DashboardView.qml exists
+                        id: dashboardViewContainer
+                        DashboardView {
+                            anchors.fill: parent
+                        }
                     }
 
                     // Transaction List View
                     Item {
-                        TransactionListView {} // Assuming TransactionListView.qml exists
+                        id: transactionListViewContainer
+                        TransactionListView {
+                            anchors.fill: parent
+                        }
                     }
 
                     // Chart Statistics View
@@ -1121,7 +982,13 @@ ApplicationWindow {
 
                     // Settings View
                     Item {
-                        SettingsView {} // Assuming SettingsView.qml exists
+                        id: settingsViewContainer // 给Item一个id，方便引用
+                        anchors.fill: parent // 确保Item填满StackLayout中的空间
+                        SettingsView {
+                            anchors.fill: parent // SettingsView填满其父Item
+                            // 将theme属性传递给SettingsView
+                            theme: mainWindow.theme 
+                        }
                     }
                 }
             }

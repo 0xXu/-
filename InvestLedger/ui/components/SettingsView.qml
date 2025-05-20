@@ -6,10 +6,14 @@ import QtQuick.Dialogs
 Item {
     id: settingsView
 
+    // 主题属性，由main.qml传入
+    property var theme
+
     // 颜色选择
     property color selectedProfitColor: profitColor
     property color selectedLossColor: lossColor
     property int backupDays: 7
+    property string appVersion: backend ? backend.getAppVersion() : "未知版本"
 
     // 保存设置
     function saveSettings() {
@@ -31,6 +35,15 @@ Item {
             backupSuccessDialog.open();
         } else {
             errorDialog.showError("备份数据库失败");
+        }
+    }
+    
+    // 检查更新
+    function checkForUpdates() {
+        if (backend.checkForUpdates()) {
+            updateAvailableDialog.open();
+        } else {
+            noUpdatesDialog.open();
         }
     }
 
@@ -76,10 +89,11 @@ Item {
                     }
                 }
             }
+            
             // 外观设置
             Rectangle {
                 Layout.fillWidth: true
-                height: 260 // 注意：原始代码中这里是260，下面外观设置的GridLayout内容较多，可能需要调整此高度
+                height: 260
                 color: cardColor
                 radius: 5
                 y: 40
@@ -160,12 +174,21 @@ Item {
                             text: "主题风格:"
                             font.pixelSize: 14
                         }
-                        ComboBox {
-                            id: themeCombo
-                            model: ["light", "dark", "system"]
-                            currentIndex: themeCombo.model.indexOf(themeManager.currentTheme)
-                            onCurrentIndexChanged: {
-                                themeManager.saveTheme(themeCombo.currentText);
+                        RowLayout {
+                            ComboBox {
+                                id: themeCombo
+                                model: ["light", "dark", "system"]
+                                currentIndex: themeCombo.model.indexOf(theme.currentTheme)
+                                onCurrentIndexChanged: {
+                                    theme.saveTheme(themeCombo.currentText);
+                                }
+                            }
+                            
+                            Button {
+                                text: theme.isDarkTheme ? "切换到亮色" : "切换到暗色"
+                                onClicked: {
+                                    theme.saveTheme(theme.isDarkTheme ? "light" : "dark");
+                                }
                             }
                         }
                         // 主色调
@@ -178,7 +201,7 @@ Item {
                             Rectangle {
                                 width: 30
                                 height: 30
-                                color: themeManager.primaryColor
+                                color: theme.primaryColor
                                 border.color: "black"
                                 border.width: 1
                             }
@@ -191,7 +214,7 @@ Item {
                             Button {
                                 text: "恢复默认"
                                 onClicked: {
-                                    themeManager.setColor("primaryColor", "#2c3e50"); // 假设这是默认主色调
+                                    theme.setColor("primaryColor", "#2c3e50"); // 假设这是默认主色调
                                 }
                             }
                         }
@@ -205,7 +228,7 @@ Item {
                             Rectangle {
                                 width: 30
                                 height: 30
-                                color: themeManager.accentColor
+                                color: theme.accentColor
                                 border.color: "black"
                                 border.width: 1
                             }
@@ -218,7 +241,7 @@ Item {
                             Button {
                                 text: "恢复默认"
                                 onClicked: {
-                                    themeManager.setColor("accentColor", "#3498db"); // 假设这是默认强调色
+                                    theme.setColor("accentColor", "#3498db"); // 假设这是默认强调色
                                 }
                             }
                         }
@@ -383,8 +406,122 @@ Item {
                     }
                 }
             }
+            
+            // 软件更新
+            Rectangle {
+                Layout.fillWidth: true
+                height: 150
+                color: cardColor
+                radius: 5
 
-            Item { height: 20 } // 底部间距
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 15
+                    spacing: 10
+
+                    Text {
+                        text: "软件更新"
+                        font.pixelSize: 16
+                        font.bold: true
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 20
+
+                        Text {
+                            text: "当前版本："
+                            font.pixelSize: 14
+                        }
+
+                        Text {
+                            text: appVersion
+                            font.pixelSize: 14
+                            font.bold: true
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        Button {
+                            text: "检查更新"
+                            onClicked: checkForUpdates()
+                        }
+                    }
+                    
+                    Text {
+                        text: "定期更新软件可以获得新功能和修复问题。"
+                        font.pixelSize: 12
+                        color: Qt.darker(textColor, 1.2)
+                        Layout.fillWidth: true
+                        wrapMode: Text.WordWrap
+                    }
+                }
+            }
+            
+            // 关于软件
+            Rectangle {
+                Layout.fillWidth: true
+                height: 200
+                color: cardColor
+                radius: 5
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 15
+                    spacing: 10
+
+                    Text {
+                        text: "关于软件"
+                        font.pixelSize: 16
+                        font.bold: true
+                    }
+
+                    Text {
+                        text: "InvestLedger - 轻量个人投资记账程序"
+                        font.pixelSize: 14
+                        font.bold: true
+                        Layout.fillWidth: true
+                    }
+
+                    Text {
+                        text: "版本：" + appVersion
+                        font.pixelSize: 14
+                        Layout.fillWidth: true
+                    }
+
+                    Text {
+                        text: "© 2023 InvestLedger 团队，保留所有权利"
+                        font.pixelSize: 14
+                        Layout.fillWidth: true
+                    }
+
+                    Text {
+                        text: "这是一个简单易用的个人投资记账工具，帮助您跟踪和分析投资盈亏。"
+                        font.pixelSize: 12
+                        color: Qt.darker(textColor, 1.2)
+                        Layout.fillWidth: true
+                        wrapMode: Text.WordWrap
+                    }
+                    
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 20
+                        Layout.topMargin: 10
+                        
+                        Button {
+                            text: "帮助文档"
+                            onClicked: helpDialog.open()
+                        }
+                        
+                        Button {
+                            text: "技术支持"
+                            onClicked: supportDialog.open()
+                        }
+                    }
+                }
+            }
+
+            Item { height: 30 } // 底部间距
         }
     } // ScrollView end
 
@@ -442,7 +579,7 @@ Item {
         }
     }
 
-    // 目标设置成功对话框 (保留了一个)
+    // 目标设置成功对话框
     Dialog {
         id: goalSetSuccessDialog
         title: "目标设置成功"
@@ -468,6 +605,180 @@ Item {
             }
         }
     }
+    
+    // 有更新可用对话框
+    Dialog {
+        id: updateAvailableDialog
+        title: "发现新版本"
+        width: 400
+        height: 250
+        anchors.centerIn: parent
+        modal: true
+        closePolicy: Popup.CloseOnEscape
+
+        contentItem: ColumnLayout {
+            spacing: 20
+
+            Text {
+                text: "发现新版本！"
+                font.pixelSize: 16
+                font.bold: true
+                Layout.fillWidth: true
+            }
+            
+            Text {
+                text: "有新版本可用：v" + backend.getLatestVersion() + "\n当前版本：" + appVersion
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+            }
+            
+            Text {
+                text: "新版本包含以下改进：\n• 用户界面优化\n• 性能提升\n• 问题修复"
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+            }
+            
+            CheckBox {
+                id: autoRestartCheckbox
+                text: "更新后自动重启"
+                checked: true
+            }
+
+            RowLayout {
+                Layout.alignment: Qt.AlignRight
+                spacing: 10
+                
+                Button {
+                    text: "稍后更新"
+                    onClicked: updateAvailableDialog.close()
+                }
+                
+                Button {
+                    text: "立即更新"
+                    highlighted: true
+                    onClicked: {
+                        backend.downloadUpdate(autoRestartCheckbox.checked);
+                        updateAvailableDialog.close();
+                    }
+                }
+            }
+        }
+    }
+    
+    // 无更新对话框
+    Dialog {
+        id: noUpdatesDialog
+        title: "检查更新"
+        width: 300
+        height: 150
+        anchors.centerIn: parent
+        modal: true
+        closePolicy: Popup.CloseOnEscape
+
+        contentItem: ColumnLayout {
+            spacing: 20
+
+            Text {
+                text: "您已经使用最新版本！"
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+            }
+
+            Button {
+                text: "确定"
+                Layout.alignment: Qt.AlignRight
+                onClicked: noUpdatesDialog.close()
+            }
+        }
+    }
+    
+    // 帮助对话框
+    Dialog {
+        id: helpDialog
+        title: "帮助文档"
+        width: 500
+        height: 400
+        anchors.centerIn: parent
+        modal: true
+        closePolicy: Popup.CloseOnEscape
+
+        contentItem: ColumnLayout {
+            spacing: 20
+
+            Text {
+                text: "InvestLedger 使用指南"
+                font.pixelSize: 18
+                font.bold: true
+                Layout.fillWidth: true
+            }
+
+            ScrollView {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                
+                Text {
+                    width: helpDialog.width - 40
+                    wrapMode: Text.WordWrap
+                    text: "## 基本使用\n\n" +
+                          "1. **仪表盘**: 查看投资总览、盈亏状况和统计数据\n" +
+                          "2. **交易列表**: 管理所有交易记录，支持筛选和排序\n" +
+                          "3. **统计图表**: 通过图表直观展示投资表现\n" +
+                          "4. **导入导出**: 支持数据的导入和导出\n\n" +
+                          "## 添加交易\n\n" +
+                          "在交易列表页面点击\"添加交易\"按钮，填写相关信息后保存。\n" +
+                          "您也可以通过快速添加功能，使用文本格式录入交易。\n\n" +
+                          "## 数据备份\n\n" +
+                          "定期备份您的数据以防丢失。在设置页面的\"备份设置\"中可以手动备份数据库。\n\n" +
+                          "## 设置目标\n\n" +
+                          "您可以在设置中设定月度或年度的盈利目标，系统会显示当前进度。\n\n" +
+                          "## 更多帮助\n\n" +
+                          "如需更多帮助，请联系技术支持。"
+                }
+            }
+
+            Button {
+                text: "关闭"
+                Layout.alignment: Qt.AlignRight
+                onClicked: helpDialog.close()
+            }
+        }
+    }
+    
+    // 技术支持对话框
+    Dialog {
+        id: supportDialog
+        title: "技术支持"
+        width: 400
+        height: 200
+        anchors.centerIn: parent
+        modal: true
+        closePolicy: Popup.CloseOnEscape
+
+        contentItem: ColumnLayout {
+            spacing: 20
+
+            Text {
+                text: "如果您在使用过程中遇到问题，请通过以下方式联系我们："
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+            }
+
+            Text {
+                text: "邮件: support@investledger.example.com\n" +
+                      "官网: www.investledger.example.com\n" +
+                      "QQ群: 12345678"
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+            }
+
+            Button {
+                text: "确定"
+                Layout.alignment: Qt.AlignRight
+                onClicked: supportDialog.close()
+            }
+        }
+    }
 
     // ColorDialogs
     ColorDialog {
@@ -488,14 +799,14 @@ Item {
         id: colorDialogPrimary
         title: "选择主色调"
         onAccepted: {
-            themeManager.setColor("primaryColor", color);
+            theme.setColor("primaryColor", color);
         }
     }
     ColorDialog {
         id: colorDialogAccent
         title: "选择强调色"
         onAccepted: {
-            themeManager.setColor("accentColor", color);
+            theme.setColor("accentColor", color);
         }
     }
 }

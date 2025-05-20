@@ -7,6 +7,8 @@ Item {
     
     // 全局错误对话框引用
     property var errorDialogRef: null
+    property var userSelectWindowRef: null
+    property var mainWindowRef: null
     
     Component.onCompleted: {
         // 初始化用户选择窗口
@@ -20,33 +22,72 @@ Item {
             // 先创建主窗口但保持不可见
             var mainWindowComponent = Qt.createComponent("main.qml");
             if (mainWindowComponent.status === Component.Ready) {
-                var mainWindowObj = mainWindowComponent.createObject(null);
-                if (mainWindowObj) {
-                    // 创建用户选择窗口并传递主窗口引用
-                    var userSelectWindow = component.createObject(null, {
-                        "mainWindow": mainWindowObj,
-                        "theme": mainWindowObj.theme,
-                        "errorDialog": mainWindowObj.errorDialog
+                mainWindowRef = mainWindowComponent.createObject(null);
+                if (mainWindowRef) {
+                    // 监听主窗口的visible属性变化
+                    mainWindowRef.visibleChanged.connect(function() {
+                        console.log("主窗口可见性变化:", mainWindowRef.visible);
                     });
                     
-                    if (!userSelectWindow) {
-                        console.error("错误: 无法创建用户选择窗口!");
-                        if (mainWindowObj.errorDialog) {
-                            mainWindowObj.errorDialog.showError("无法创建用户选择窗口，应用程序将退出。");
-                            errorDialogRef = mainWindowObj.errorDialog;
-                        }
+                    // 创建用户选择窗口并传递主窗口引用
+                    userSelectWindowRef = component.createObject(null, {
+                        "mainWindow": mainWindowRef,
+                        "theme": mainWindowRef.theme
+                    });
+                    
+                    if (userSelectWindowRef) {
+                        // 连接用户选择窗口的userSelected信号
+                        userSelectWindowRef.userSelected.connect(function(username) {
+                            console.log("用户选择了:", username);
+                            
+                            // 先选择用户，这将触发数据加载
+                            mainWindowRef.selectUser(username);
+                            
+                            // 创建一个循环检查定时器，确保主窗口显示
+                            var checkVisibleTimer = Qt.createQmlObject(
+                                'import QtQuick; Timer {interval: 300; repeat: true;}', 
+                                appRoot
+                            );
+                            
+                            var checkCount = 0;
+                            checkVisibleTimer.triggered.connect(function() {
+                                checkCount++;
+                                console.log("检查主窗口可见性:", mainWindowRef.visible, "尝试次数:", checkCount);
+                                
+                                if (mainWindowRef.visible) {
+                                    // 主窗口已显示，停止计时器并关闭选择窗口
+                                    checkVisibleTimer.stop();
+                                    userSelectWindowRef.close();
+                                    console.log("主窗口已显示，关闭用户选择窗口");
+                                } else if (checkCount >= 10) {
+                                    // 超过尝试次数，强制显示主窗口
+                                    console.log("强制显示主窗口");
+                                    mainWindowRef.visible = true;
+                                    checkVisibleTimer.stop();
+                                    userSelectWindowRef.close();
+                                }
+                            });
+                            
+                            checkVisibleTimer.start();
+                        });
+                        
+                        // 用户选择窗口关闭时，如果主窗口还不可见，则退出应用
+                        userSelectWindowRef.closing.connect(function(close) {
+                            if (!mainWindowRef.visible) {
+                                Qt.quit();
+                            }
+                        });
                     } else {
-                        // 保存错误对话框引用
-                        errorDialogRef = mainWindowObj.errorDialog;
+                        console.error("创建用户选择窗口失败");
                     }
                 } else {
-                    console.error("错误: 无法创建主窗口!");
+                    console.error("创建主窗口失败");
                 }
             } else {
-                console.error("错误: 加载主窗口组件失败: " + mainWindowComponent.errorString());
+                console.error("加载main.qml失败:", mainWindowComponent.errorString());
             }
         } else {
-            console.error("错误: 加载用户选择窗口组件失败: " + component.errorString());
+            console.error("加载UserSelectWindow.qml失败:", component.errorString());
         }
     }
 } 
