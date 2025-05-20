@@ -16,6 +16,35 @@ ApplicationWindow {
     width: 1280
     height: 800
     title: qsTr("InvestLedger - 轻量个人投资记账程序") + " - v" + appVersion
+    
+    // 添加窗口渲染和拖动性能优化，并确保标题栏和控制按钮显示
+    flags: Qt.Window | Qt.WindowTitleHint | Qt.WindowSystemMenuHint | Qt.WindowMinMaxButtonsHint | Qt.WindowCloseButtonHint
+    
+    // 减少渲染压力 - 仅当需要时更新
+    WindowChanger {
+        id: windowChanger
+        target: mainWindow
+    }
+    
+    // 使用低级别的渲染和动画处理，提高性能
+    Component.onCompleted: {
+        if (typeof mainWindow.renderingStats !== "undefined") {
+            mainWindow.renderingStats.enabled = false;
+        }
+        
+        // 加载主题设置
+        themeManagerInstance.loadTheme();
+    }
+    
+    // 优化窗口更新逻辑，减少拖动时的重绘
+    onActiveFocusItemChanged: {
+        if (activeFocusItem) {
+            // 窗口有活动焦点时才更新
+            if (typeof mainWindow.requestUpdate === "function") {
+                mainWindow.requestUpdate();
+            }
+        }
+    }
 
     // Application-wide properties
     property var budgetAlerts: []
@@ -125,14 +154,6 @@ ApplicationWindow {
     function loadDashboard() {
         currentPage = 0;
         // Additional dashboard specific loading logic can go here
-    }
-
-    // Lifecycle hook: executed after component creation
-    Component.onCompleted: {
-        // Load theme settings before showing any UI that depends on it
-        themeManagerInstance.loadTheme();
-        // 不要在这里设置mainWindow.visible为true，让用户选择界面先显示
-        // 用户选择后，selectUser函数会设置mainWindow.visible为true
     }
 
     // --- User Selection View ---
@@ -798,16 +819,19 @@ ApplicationWindow {
     } // End of ToolBar (header)
 
     // --- Main Content Area of Application Window ---
-    // This ColumnLayout implicitly becomes the contentItem of ApplicationWindow,
-    // occupying space below the header and above the footer.
     ColumnLayout {
-        anchors.fill: parent // Fills the remaining space in ApplicationWindow
+        id: mainContentLayout
+        anchors.fill: parent
         spacing: 0
+        
+        // Applied layer optimization here
+        layer.enabled: true
+        layer.samples: 2 // Using 2 samples for a balance
+        layer.smooth: true
 
-        // SplitView for Navigation and Main Views
         SplitView {
             Layout.fillWidth: true
-            Layout.fillHeight: true // Fills available height after header
+            Layout.fillHeight: true
 
             // Left-side Navigation Bar
             Rectangle {
@@ -934,49 +958,11 @@ ApplicationWindow {
 
                     // Import/Export Page
                     Item {
-                        ColumnLayout {
+                        id: importExportViewContainer
+                        anchors.fill: parent
+                        ImportExportView {
                             anchors.fill: parent
-                            spacing: 20
-                            anchors.margins: 20 // Add anchors.margins for this page
-
-                            Text {
-                                text: qsTr("数据导入导出")
-                                font.pixelSize: 24
-                                font.bold: true
-                                color: theme.textColor
-                            }
-
-                            Rectangle {
-                                Layout.fillWidth: true
-                                height: 120
-                                color: cardColor
-                                radius: 5
-                                DropShadow { anchors.fill: parent; horizontalOffset: 2; verticalOffset: 2; radius: 5; color: "#20000000"; source: parent }
-
-                                RowLayout {
-                                    anchors.centerIn: parent
-                                    spacing: 40
-
-                                    Button {
-                                        text: qsTr("导入数据")
-                                        icon.name: "import"
-                                        onClicked: {
-                                            var dialog = dialogLoader.loadImportDialog();
-                                            if (dialog) dialog.open();
-                                        }
-                                    }
-
-                                    Button {
-                                        text: qsTr("导出数据")
-                                        icon.name: "export"
-                                        onClicked: {
-                                            var dialog = dialogLoader.loadExportDialog();
-                                            if (dialog) dialog.open();
-                                        }
-                                    }
-                                }
-                            }
-                            Item { Layout.fillHeight: true } // Filler item
+                            theme: mainWindow.theme
                         }
                     }
 

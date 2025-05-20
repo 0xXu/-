@@ -14,6 +14,339 @@ Item {
     property color selectedLossColor: lossColor
     property int backupDays: 7
     property string appVersion: backend ? backend.getAppVersion() : "未知版本"
+    
+    // 自定义控件样式
+    property int buttonHeight: 36
+    property int buttonWidth: 100 // 减小按钮宽度以适应布局
+    property int buttonRadius: 4
+    property int inputHeight: 36
+    property int inputRadius: 4
+    property string buttonFontFamily: "Microsoft YaHei"
+    property int buttonFontSize: 14
+    property int inputFontSize: 14
+    property int labelFontSize: 14
+    property color buttonBgColor: theme ? theme.accentColor : "#3498db"
+    property color buttonTextColor: "white"
+    property color buttonBorderColor: Qt.darker(buttonBgColor, 1.1)
+    property color inputBgColor: theme ? (theme.isDarkTheme ? "#2c3e50" : "#f5f5f5") : "#f5f5f5"
+    property color inputBorderColor: theme ? (theme.isDarkTheme ? "#34495e" : "#d0d0d0") : "#d0d0d0"
+    property color inputTextColor: theme ? (theme.isDarkTheme ? "white" : "black") : "black"
+
+    // 自定义按钮组件
+    component CustomButton: Rectangle {
+        id: customBtn
+        property string text: "按钮"
+        property bool highlighted: false
+        property bool isPressed: false
+        signal clicked()
+
+        width: buttonWidth
+        height: buttonHeight
+        radius: buttonRadius
+        color: highlighted ? buttonBgColor : (theme ? (theme.isDarkTheme ? "#34495e" : "#e0e0e0") : "#e0e0e0")
+        border.color: highlighted ? buttonBorderColor : inputBorderColor
+        border.width: 1
+
+        Text {
+            anchors.centerIn: parent
+            text: parent.text
+            font.family: buttonFontFamily
+            font.pixelSize: buttonFontSize
+            color: highlighted ? buttonTextColor : (theme ? (theme.isDarkTheme ? "white" : "#333333") : "#333333")
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            hoverEnabled: true
+            onEntered: parent.opacity = 0.8
+            onExited: parent.opacity = 1.0
+            onPressed: parent.isPressed = true
+            onReleased: parent.isPressed = false
+            onClicked: parent.clicked()
+        }
+
+        states: [
+            State {
+                name: "pressed"
+                when: isPressed
+                PropertyChanges {
+                    target: customBtn
+                    color: highlighted ? Qt.darker(buttonBgColor, 1.2) : Qt.darker(color, 1.1)
+                }
+            }
+        ]
+    }
+
+    // 自定义下拉框组件
+    component CustomComboBox: Rectangle {
+        id: customCombo
+        property var model
+        property string textRole: ""
+        property string valueRole: ""
+        property int currentIndex: 0
+        property var currentText: model && model.length > 0 && currentIndex >= 0 ? 
+                                 (textRole ? model[currentIndex][textRole] : model[currentIndex]) : ""
+        property var currentValue: model && model.length > 0 && valueRole && currentIndex >= 0 ? 
+                                 model[currentIndex][valueRole] : currentIndex
+        signal indexChanged()
+
+        width: buttonWidth * 1.2
+        height: inputHeight
+        radius: inputRadius
+        color: inputBgColor
+        border.color: inputBorderColor
+        border.width: 1
+
+        Text {
+            id: selectedText
+            anchors.left: parent.left
+            anchors.leftMargin: 10
+            anchors.verticalCenter: parent.verticalCenter
+            text: customCombo.currentText
+            font.family: buttonFontFamily
+            font.pixelSize: inputFontSize
+            color: inputTextColor
+        }
+
+        Rectangle {
+            width: height
+            height: parent.height
+            anchors.right: parent.right
+            color: "transparent"
+            Image {
+                anchors.centerIn: parent
+                source: theme && theme.isDarkTheme ? "qrc:/icons/dropdown_dark.png" : "qrc:/icons/dropdown_light.png"
+                width: 12
+                height: 12
+                sourceSize.width: 12
+                sourceSize.height: 12
+            }
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            onClicked: {
+                if (!dropdownMenu.visible) {
+                    dropdownMenu.open()
+                } else {
+                    dropdownMenu.close()
+                }
+            }
+        }
+
+        Popup {
+            id: dropdownMenu
+            y: parent.height
+            width: parent.width
+            height: Math.min(300, contentItem.implicitHeight)
+            padding: 0
+            closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+
+            contentItem: ListView {
+                implicitHeight: contentHeight
+                model: customCombo.model
+                delegate: Rectangle {
+                    width: parent.width
+                    height: inputHeight
+                    color: index === customCombo.currentIndex ? 
+                           (theme ? theme.accentColor : "#3498db") : 
+                           (theme ? (theme.isDarkTheme ? "#2c3e50" : "white") : "white")
+                    
+                    Text {
+                        anchors.left: parent.left
+                        anchors.leftMargin: 10
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: customCombo.textRole ? modelData[customCombo.textRole] : modelData
+                        color: index === customCombo.currentIndex ? "white" : inputTextColor
+                        font.family: buttonFontFamily
+                        font.pixelSize: inputFontSize
+                    }
+                    
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: {
+                            customCombo.currentIndex = index
+                            customCombo.indexChanged()
+                            dropdownMenu.close()
+                        }
+                    }
+                }
+                
+                ScrollBar.vertical: ScrollBar {}
+            }
+        }
+    }
+
+    // 自定义SpinBox组件
+    component CustomSpinBox: Rectangle {
+        id: customSpin
+        property int from: 0
+        property int to: 100
+        property int value: 0
+        property int stepSize: 1
+        property int decimals: 0
+        property alias realValue: internalProps.realValue // 别名以便外部访问
+        property var textFromValue: function(value, locale) { return value.toString() }
+        property var valueFromText: function(text, locale) { return parseInt(text) }
+        signal spinValueChanged()
+
+        QtObject {
+            id: internalProps
+            property real realValue: customSpin.value // 默认realValue
+        }
+        
+        width: buttonWidth * 1.2 // 例如 100 * 1.2 = 120
+        height: inputHeight
+        radius: inputRadius
+        color: inputBgColor
+        border.color: inputBorderColor
+        border.width: 1
+
+        Row {
+            anchors.fill: parent
+            spacing: 1 // 稍微增加一点间距
+
+            Rectangle { // Minus button
+                id: minusButton
+                width: 30 // 固定宽度
+                height: parent.height
+                color: "transparent"
+                
+                Text {
+                    anchors.centerIn: parent
+                    text: "-"
+                    font.pixelSize: 20
+                    color: inputTextColor
+                }
+                
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: {
+                        if (customSpin.value > customSpin.from) {
+                            customSpin.value -= customSpin.stepSize
+                            customSpin.spinValueChanged()
+                        }
+                    }
+                }
+            }
+
+            Rectangle { // TextInput container
+                width: parent.width - minusButton.width - plusButton.width - parent.spacing * 2
+                height: parent.height
+                color: "transparent"
+                
+                TextInput {
+                    id: spinInput
+                    anchors.fill: parent
+                    anchors.leftMargin: 5
+                    anchors.rightMargin: 5
+                    verticalAlignment: TextInput.AlignVCenter
+                    horizontalAlignment: TextInput.AlignHCenter
+                    text: customSpin.textFromValue(customSpin.value, Qt.locale())
+                    font.family: buttonFontFamily
+                    font.pixelSize: inputFontSize
+                    color: inputTextColor
+                    selectByMouse: true
+                    validator: IntValidator {
+                        bottom: customSpin.from
+                        top: customSpin.to
+                    }
+                    
+                    onEditingFinished: {
+                        var parsedValue = customSpin.valueFromText(text, Qt.locale())
+                        if (parsedValue >= customSpin.from && parsedValue <= customSpin.to) {
+                           customSpin.value = parsedValue
+                        } else {
+                            // 如果值无效，恢复到旧值
+                            spinInput.text = customSpin.textFromValue(customSpin.value, Qt.locale())
+                        }
+                        customSpin.spinValueChanged()
+                    }
+                }
+            }
+
+            Rectangle { // Plus button
+                id: plusButton
+                width: 30 // 固定宽度
+                height: parent.height
+                color: "transparent"
+                
+                Text {
+                    anchors.centerIn: parent
+                    text: "+"
+                    font.pixelSize: 20
+                    color: inputTextColor
+                }
+                
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: {
+                        if (customSpin.value < customSpin.to) {
+                            customSpin.value += customSpin.stepSize
+                            customSpin.spinValueChanged()
+                        }
+                    }
+                }
+            }
+        }
+        Component.onCompleted: {
+            // Allow specific instances to override realValue calculation
+            if (typeof monthlyGoalSpinBox !== 'undefined' && customSpin === monthlyGoalSpinBox) {
+                 internalProps.realValue = customSpin.value / 100.0
+            }
+        }
+        onSpinValueChanged: {
+             if (typeof monthlyGoalSpinBox !== 'undefined' && customSpin === monthlyGoalSpinBox) {
+                 internalProps.realValue = customSpin.value / 100.0
+            } else {
+                 internalProps.realValue = customSpin.value
+            }
+        }
+    }
+    
+    // 自定义CheckBox组件
+    component CustomCheckBox: Row {
+        id: customCheck
+        property bool checked: false
+        property string text: "选项"
+        signal checkClicked()
+        spacing: 8
+        
+        Rectangle {
+            id: checkRect
+            width: 20
+            height: 20
+            radius: 3
+            border.color: inputBorderColor
+            border.width: 1
+            color: customCheck.checked ? buttonBgColor : inputBgColor
+            anchors.verticalCenter: parent.verticalCenter
+            
+            Text {
+                anchors.centerIn: parent
+                text: "✓"
+                color: "white"
+                font.pixelSize: 14
+                visible: customCheck.checked
+            }
+        }
+        
+        Text {
+            text: customCheck.text
+            font.family: buttonFontFamily
+            font.pixelSize: labelFontSize
+            color: theme ? (theme.isDarkTheme ? "white" : "#333333") : "#333333"
+            anchors.verticalCenter: parent.verticalCenter
+        }
+        
+        MouseArea {
+            anchors.fill: parent
+            onClicked: {
+                customCheck.checked = !customCheck.checked
+                customCheck.checkClicked()
+            }
+        }
+    }
 
     // 保存设置
     function saveSettings() {
@@ -59,7 +392,7 @@ Item {
             width: settingsView.width - 30
             spacing: 20
 
-            // 设置标题
+            // 设置标题 (移除保存按钮)
             Rectangle {
                 Layout.fillWidth: true
                 height: 50
@@ -82,13 +415,9 @@ Item {
 
                     Item { Layout.fillWidth: true }
 
-                    Button {
-                        text: "保存设置"
-                        highlighted: true
-                        onClicked: saveSettings()
+                    // 保存设置按钮已移除
                     }
                 }
-            }
             
             // 外观设置
             Rectangle {
@@ -118,10 +447,12 @@ Item {
                         // 盈利颜色
                         Text {
                             text: "盈利颜色:"
-                            font.pixelSize: 14
+                            font.pixelSize: labelFontSize
+                            verticalAlignment: Text.AlignVCenter
                         }
                         RowLayout {
                             spacing: 10
+                            Layout.alignment: Qt.AlignLeft
                             Rectangle {
                                 width: 30
                                 height: 30
@@ -129,26 +460,29 @@ Item {
                                 border.color: "black"
                                 border.width: 1
                             }
-                            Button {
+                            CustomButton {
                                 text: "选择颜色"
                                 onClicked: {
                                     colorDialogProfit.open();
                                 }
                             }
-                            Button {
+                            CustomButton {
                                 text: "恢复默认"
                                 onClicked: {
-                                    selectedProfitColor = "#e74c3c"; // 假设这是默认盈利颜色
+                                    selectedProfitColor = "#e74c3c";
+                                    profitColor = selectedProfitColor; // 即时应用
                                 }
                             }
                         }
                         // 亏损颜色
                         Text {
                             text: "亏损颜色:"
-                            font.pixelSize: 14
+                            font.pixelSize: labelFontSize
+                            verticalAlignment: Text.AlignVCenter
                         }
                         RowLayout {
                             spacing: 10
+                            Layout.alignment: Qt.AlignLeft
                             Rectangle {
                                 width: 30
                                 height: 30
@@ -156,35 +490,39 @@ Item {
                                 border.color: "black"
                                 border.width: 1
                             }
-                            Button {
+                            CustomButton {
                                 text: "选择颜色"
                                 onClicked: {
                                     colorDialogLoss.open();
                                 }
                             }
-                            Button {
+                            CustomButton {
                                 text: "恢复默认"
                                 onClicked: {
-                                    selectedLossColor = "#2ecc71"; // 假设这是默认亏损颜色
+                                    selectedLossColor = "#2ecc71";
+                                    lossColor = selectedLossColor; // 即时应用
                                 }
                             }
                         }
                         // 主题风格
                         Text {
                             text: "主题风格:"
-                            font.pixelSize: 14
+                            font.pixelSize: labelFontSize
+                            verticalAlignment: Text.AlignVCenter
                         }
                         RowLayout {
-                            ComboBox {
-                                id: themeCombo
-                                model: ["light", "dark", "system"]
-                                currentIndex: themeCombo.model.indexOf(theme.currentTheme)
-                                onCurrentIndexChanged: {
-                                    theme.saveTheme(themeCombo.currentText);
+                            Layout.alignment: Qt.AlignLeft
+                            spacing: 10
+                            CustomComboBox {
+                            id: themeCombo
+                            model: ["light", "dark", "system"]
+                                currentIndex: model.indexOf(theme.currentTheme)
+                                onIndexChanged: {
+                                    theme.saveTheme(currentText);
                                 }
                             }
                             
-                            Button {
+                            CustomButton {
                                 text: theme.isDarkTheme ? "切换到亮色" : "切换到暗色"
                                 onClicked: {
                                     theme.saveTheme(theme.isDarkTheme ? "light" : "dark");
@@ -194,10 +532,12 @@ Item {
                         // 主色调
                         Text {
                             text: "主色调:"
-                            font.pixelSize: 14
+                            font.pixelSize: labelFontSize
+                            verticalAlignment: Text.AlignVCenter
                         }
                         RowLayout {
                             spacing: 10
+                            Layout.alignment: Qt.AlignLeft
                             Rectangle {
                                 width: 30
                                 height: 30
@@ -205,26 +545,28 @@ Item {
                                 border.color: "black"
                                 border.width: 1
                             }
-                            Button {
+                            CustomButton {
                                 text: "选择颜色"
                                 onClicked: {
                                     colorDialogPrimary.open();
                                 }
                             }
-                            Button {
+                            CustomButton {
                                 text: "恢复默认"
                                 onClicked: {
-                                    theme.setColor("primaryColor", "#2c3e50"); // 假设这是默认主色调
+                                    theme.setColor("primaryColor", "#2c3e50");
                                 }
                             }
                         }
                         // 强调色
                         Text {
                             text: "强调色:"
-                            font.pixelSize: 14
+                            font.pixelSize: labelFontSize
+                            verticalAlignment: Text.AlignVCenter
                         }
                         RowLayout {
                             spacing: 10
+                            Layout.alignment: Qt.AlignLeft
                             Rectangle {
                                 width: 30
                                 height: 30
@@ -232,16 +574,16 @@ Item {
                                 border.color: "black"
                                 border.width: 1
                             }
-                            Button {
+                            CustomButton {
                                 text: "选择颜色"
                                 onClicked: {
                                     colorDialogAccent.open();
                                 }
                             }
-                            Button {
+                            CustomButton {
                                 text: "恢复默认"
                                 onClicked: {
-                                    theme.setColor("accentColor", "#3498db"); // 假设这是默认强调色
+                                    theme.setColor("accentColor", "#3498db");
                                 }
                             }
                         }
@@ -252,11 +594,13 @@ Item {
             // 备份设置
             Rectangle {
                 Layout.fillWidth: true
-                height: 180
+                // height: 180  // 移除固定高度
+                implicitHeight: backupSettingsLayout.implicitHeight + 30 // 根据内容自动调整高度
                 color: cardColor
                 radius: 5
 
                 ColumnLayout {
+                    id: backupSettingsLayout
                     anchors.fill: parent
                     anchors.margins: 15
                     spacing: 10
@@ -273,20 +617,21 @@ Item {
                         rowSpacing: 15
                         columnSpacing: 20
 
-                        // 备份天数
                         Text {
                             text: "保留备份天数:"
-                            font.pixelSize: 14
+                            font.pixelSize: labelFontSize
+                            verticalAlignment: Text.AlignVCenter
                         }
 
-                        SpinBox {
+                        CustomSpinBox {
                             id: backupDaysSpinBox
                             from: 1
                             to: 30
-                            value: backupDays
+                            value: settingsView.backupDays
 
-                            onValueChanged: {
-                                backupDays = value;
+                            onSpinValueChanged: {
+                                settingsView.backupDays = value;
+                                backend.cleanupBackups(value);
                             }
                         }
                     }
@@ -295,7 +640,7 @@ Item {
                         Layout.topMargin: 10
                         Layout.fillWidth: true
 
-                        Button {
+                        CustomButton {
                             text: "立即备份数据库"
                             onClicked: backupDatabase()
                         }
@@ -303,8 +648,11 @@ Item {
                         Text {
                             text: "备份将保存在用户数据目录中"
                             font.pixelSize: 12
-                            color: Qt.darker(textColor, 1.2) // 确保 textColor 在此上下文中可用
+                            color: Qt.darker(textColor, 1.2)
                             Layout.fillWidth: true
+                            wrapMode: Text.WordWrap
+                            Layout.leftMargin: 10
+                            verticalAlignment: Text.AlignVCenter
                         }
                     }
                 }
@@ -313,11 +661,13 @@ Item {
             // 目标设置
             Rectangle {
                 Layout.fillWidth: true
-                height: 250 // 此高度可能需要根据内容调整
+                // height: 250  // 移除固定高度
+                implicitHeight: goalSettingsLayout.implicitHeight + 30 // 根据内容自动调整高度
                 color: cardColor
                 radius: 5
 
                 ColumnLayout {
+                    id: goalSettingsLayout
                     anchors.fill: parent
                     anchors.margins: 15
                     spacing: 10
@@ -334,33 +684,40 @@ Item {
                         rowSpacing: 15
                         columnSpacing: 20
 
-                        // 月度目标
                         Text {
                             text: "月度目标:"
-                            font.pixelSize: 14
+                            font.pixelSize: labelFontSize
+                            verticalAlignment: Text.AlignVCenter
                         }
 
-                        SpinBox {
+                        CustomSpinBox {
                             id: monthlyGoalSpinBox
+                            width: buttonWidth * 1.4
                             from: 0
-                            to: 1000000
-                            value: 5000 // 内部值，乘以100后为5000.00
+                            to: 100000000
+                            value: 5000
                             stepSize: 100
 
-                            property int decimals: 2
-                            property real realValue: value / 100
-
-                            textFromValue: function(value, locale) {
-                                return Number(value / 100).toLocaleString(locale, 'f', decimals)
+                            textFromValue: function(val, locale) {
+                                return Number(val / 100.0).toLocaleString(locale, 'f', 2)
                             }
 
-                            valueFromText: function(text, locale) {
-                                return Number.fromLocaleString(locale, text) * 100
+                            valueFromText: function(txt, locale) {
+                                var num = Number.fromLocaleString(locale, txt);
+                                return Math.round(num * 100);
+                            }
+                            
+                            Component.onCompleted: {
+                                internalProps.realValue = value / 100.0;
+                            }
+                            onSpinValueChanged: {
+                                internalProps.realValue = value / 100.0;
                             }
                         }
 
-                        ComboBox {
+                        CustomComboBox {
                             id: monthCombo
+                            width: buttonWidth * 0.8
                             model: [
                                 {text: "1月", value: 1}, {text: "2月", value: 2},
                                 {text: "3月", value: 3}, {text: "4月", value: 4},
@@ -371,28 +728,31 @@ Item {
                             ]
                             textRole: "text"
                             valueRole: "value"
-                            currentIndex: new Date().getMonth() // JavaScript的getMonth()返回0-11，所以1月是0
+                            currentIndex: new Date().getMonth()
                         }
 
-                        // 年份选择
                         Text {
                             text: "年份:"
-                            font.pixelSize: 14
+                            font.pixelSize: labelFontSize
+                            verticalAlignment: Text.AlignVCenter
                         }
 
-                        SpinBox {
+                        CustomSpinBox {
                             id: yearSpinBox
+                            width: buttonWidth * 1.0
                             from: 2020
                             to: 2100
                             value: new Date().getFullYear()
                         }
 
-                        Button {
+                        CustomButton {
                             text: "设置月度目标"
+                            Layout.columnSpan: comportementGrid.columns > 2 ? 1 : comportementGrid.columns
+                            Layout.alignment: Qt.AlignRight
                             onClicked: {
                                 var success = backend.setBudgetGoal(
                                     yearSpinBox.value,
-                                    monthCombo.currentValue, // currentValue 是 ComboBox model中定义的value
+                                    monthCombo.currentValue,
                                     monthlyGoalSpinBox.realValue
                                 );
 
@@ -406,15 +766,17 @@ Item {
                     }
                 }
             }
-            
+
             // 软件更新
             Rectangle {
                 Layout.fillWidth: true
-                height: 150
+                // height: 150  // 移除固定高度
+                implicitHeight: updateLayout.implicitHeight + 30 // 根据内容自动调整高度
                 color: cardColor
                 radius: 5
 
                 ColumnLayout {
+                    id: updateLayout
                     anchors.fill: parent
                     anchors.margins: 15
                     spacing: 10
@@ -431,18 +793,18 @@ Item {
 
                         Text {
                             text: "当前版本："
-                            font.pixelSize: 14
+                            font.pixelSize: labelFontSize
                         }
 
                         Text {
                             text: appVersion
-                            font.pixelSize: 14
+                            font.pixelSize: labelFontSize
                             font.bold: true
                         }
 
                         Item { Layout.fillWidth: true }
 
-                        Button {
+                        CustomButton {
                             text: "检查更新"
                             onClicked: checkForUpdates()
                         }
@@ -461,11 +823,13 @@ Item {
             // 关于软件
             Rectangle {
                 Layout.fillWidth: true
-                height: 200
+                // height: 200  // 移除固定高度
+                implicitHeight: aboutLayout.implicitHeight + 30 // 根据内容自动调整高度
                 color: cardColor
                 radius: 5
 
                 ColumnLayout {
+                    id: aboutLayout
                     anchors.fill: parent
                     anchors.margins: 15
                     spacing: 10
@@ -478,20 +842,20 @@ Item {
 
                     Text {
                         text: "InvestLedger - 轻量个人投资记账程序"
-                        font.pixelSize: 14
+                        font.pixelSize: labelFontSize
                         font.bold: true
                         Layout.fillWidth: true
                     }
 
                     Text {
                         text: "版本：" + appVersion
-                        font.pixelSize: 14
+                        font.pixelSize: labelFontSize
                         Layout.fillWidth: true
                     }
 
                     Text {
                         text: "© 2023 InvestLedger 团队，保留所有权利"
-                        font.pixelSize: 14
+                        font.pixelSize: labelFontSize
                         Layout.fillWidth: true
                     }
 
@@ -508,12 +872,12 @@ Item {
                         spacing: 20
                         Layout.topMargin: 10
                         
-                        Button {
+                        CustomButton {
                             text: "帮助文档"
                             onClicked: helpDialog.open()
                         }
                         
-                        Button {
+                        CustomButton {
                             text: "技术支持"
                             onClicked: supportDialog.open()
                         }
@@ -525,57 +889,23 @@ Item {
         }
     } // ScrollView end
 
-    // 保存成功对话框
+    // 保存成功对话框 (已移除，因为不再有全局保存按钮)
+    /*
     Dialog {
         id: saveSuccessDialog
-        title: "保存成功"
-        width: 300
-        height: 150
-        anchors.centerIn: parent
-        modal: true
-        closePolicy: Popup.CloseOnEscape
-
-        contentItem: ColumnLayout {
-            spacing: 20
-
-            Text {
-                text: "设置保存成功！"
-                Layout.fillWidth: true
-                wrapMode: Text.WordWrap
-            }
-
-            Button {
-                text: "确定"
-                Layout.alignment: Qt.AlignRight
-                onClicked: saveSuccessDialog.close()
-            }
-        }
+        // ...
     }
+    */
 
     // 备份成功对话框
     Dialog {
         id: backupSuccessDialog
         title: "备份成功"
-        width: 300
-        height: 150
-        anchors.centerIn: parent
+        standardButtons: Dialog.Ok
         modal: true
-        closePolicy: Popup.CloseOnEscape
-
-        contentItem: ColumnLayout {
-            spacing: 20
-
-            Text {
-                text: "数据库备份成功！"
-                Layout.fillWidth: true
-                wrapMode: Text.WordWrap
-            }
-
-            Button {
-                text: "确定"
-                Layout.alignment: Qt.AlignRight
-                onClicked: backupSuccessDialog.close()
-            }
+        contentItem: Text {
+            text: "数据库备份成功！"
+            wrapMode: Text.WordWrap
         }
     }
 
@@ -583,30 +913,15 @@ Item {
     Dialog {
         id: goalSetSuccessDialog
         title: "目标设置成功"
-        width: 300
-        height: 150
-        anchors.centerIn: parent
+        standardButtons: Dialog.Ok
         modal: true
-        closePolicy: Popup.CloseOnEscape
-
-        contentItem: ColumnLayout {
-            spacing: 20
-
-            Text {
-                text: "盈利目标设置成功！"
-                Layout.fillWidth: true
-                wrapMode: Text.WordWrap
-            }
-
-            Button {
-                text: "确定"
-                Layout.alignment: Qt.AlignRight
-                onClicked: goalSetSuccessDialog.close()
-            }
+        contentItem: Text {
+            text: "盈利目标设置成功！"
+            wrapMode: Text.WordWrap
         }
     }
     
-    // 有更新可用对话框
+    // 有更新可用对话框 (Ensure CustomButton and CustomCheckBox are used)
     Dialog {
         id: updateAvailableDialog
         title: "发现新版本"
@@ -627,18 +942,18 @@ Item {
             }
             
             Text {
-                text: "有新版本可用：v" + backend.getLatestVersion() + "\n当前版本：" + appVersion
+                text: "有新版本可用：v" + (backend ? backend.getLatestVersion() : "N/A") + "\n当前版本：" + appVersion
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
             }
-            
+
             Text {
                 text: "新版本包含以下改进：\n• 用户界面优化\n• 性能提升\n• 问题修复"
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
             }
-            
-            CheckBox {
+
+            CustomCheckBox {
                 id: autoRestartCheckbox
                 text: "更新后自动重启"
                 checked: true
@@ -648,51 +963,36 @@ Item {
                 Layout.alignment: Qt.AlignRight
                 spacing: 10
                 
-                Button {
+                CustomButton {
                     text: "稍后更新"
                     onClicked: updateAvailableDialog.close()
                 }
                 
-                Button {
+                CustomButton {
                     text: "立即更新"
                     highlighted: true
                     onClicked: {
-                        backend.downloadUpdate(autoRestartCheckbox.checked);
+                        if(backend) backend.downloadUpdate(autoRestartCheckbox.checked);
                         updateAvailableDialog.close();
                     }
                 }
             }
         }
     }
-    
-    // 无更新对话框
+
+    // 无更新对话框 (Ensure CustomButton is used)
     Dialog {
         id: noUpdatesDialog
         title: "检查更新"
-        width: 300
-        height: 150
-        anchors.centerIn: parent
+        standardButtons: Dialog.Ok
         modal: true
-        closePolicy: Popup.CloseOnEscape
-
-        contentItem: ColumnLayout {
-            spacing: 20
-
-            Text {
-                text: "您已经使用最新版本！"
-                Layout.fillWidth: true
-                wrapMode: Text.WordWrap
-            }
-
-            Button {
-                text: "确定"
-                Layout.alignment: Qt.AlignRight
-                onClicked: noUpdatesDialog.close()
-            }
+        contentItem: Text {
+            text: "您已经使用最新版本！"
+            wrapMode: Text.WordWrap
         }
     }
     
-    // 帮助对话框
+    // 帮助对话框 (Ensure CustomButton is used)
     Dialog {
         id: helpDialog
         title: "帮助文档"
@@ -719,7 +1019,7 @@ Item {
                 
                 Text {
                     width: helpDialog.width - 40
-                    wrapMode: Text.WordWrap
+                wrapMode: Text.WordWrap
                     text: "## 基本使用\n\n" +
                           "1. **仪表盘**: 查看投资总览、盈亏状况和统计数据\n" +
                           "2. **交易列表**: 管理所有交易记录，支持筛选和排序\n" +
@@ -737,15 +1037,15 @@ Item {
                 }
             }
 
-            Button {
+            CustomButton {
                 text: "关闭"
                 Layout.alignment: Qt.AlignRight
                 onClicked: helpDialog.close()
             }
         }
     }
-    
-    // 技术支持对话框
+
+    // 技术支持对话框 (Ensure CustomButton is used)
     Dialog {
         id: supportDialog
         title: "技术支持"
@@ -772,7 +1072,7 @@ Item {
                 wrapMode: Text.WordWrap
             }
 
-            Button {
+            CustomButton {
                 text: "确定"
                 Layout.alignment: Qt.AlignRight
                 onClicked: supportDialog.close()
@@ -786,6 +1086,7 @@ Item {
         title: "选择盈利颜色"
         onAccepted: {
             settingsView.selectedProfitColor = color;
+            profitColor = color; // 即时应用
         }
     }
     ColorDialog {
@@ -793,6 +1094,7 @@ Item {
         title: "选择亏损颜色"
         onAccepted: {
             settingsView.selectedLossColor = color;
+            lossColor = color; // 即时应用
         }
     }
     ColorDialog {
