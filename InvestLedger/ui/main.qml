@@ -23,6 +23,7 @@ ApplicationWindow {
     property bool userSelected: false // True after a user is successfully selected
     property string currentUser: ""
     property int currentPage: 0  // 0: Dashboard, 1: Transactions, 2: Charts, 3: Import/Export, 4: Settings
+    property bool isLoading: false // 控制加载动画显示
 
     // Check if QtCharts module was successfully imported
     property bool chartsAvailable: typeof Charts !== 'undefined'
@@ -74,21 +75,48 @@ ApplicationWindow {
     // Function to select a user and initialize the main application UI
     function selectUser(username) {
         try {
-            if (backend.selectUser(username)) {
-                userSelected = true;
-                currentUser = username;
-                theme.loadTheme(); // Load theme settings for the selected user
-                loadDashboard(); // Load the dashboard content
-                mainWindow.visible = true; // Make the main application window visible
-                
-                // 选择用户后检查更新
-                backend.checkForUpdates();
-            } else {
-                errorDialog.showError(qsTr("选择用户失败: 用户 '%1' 不存在或无法加载。").arg(username));
-            }
+            // 显示加载动画
+            isLoading = true;
+            
+            // 使用Timer确保UI更新并显示加载动画
+            loadingTimer.username = username;
+            loadingTimer.start();
         } catch (e) {
             console.error("Error selecting user:", e);
             errorDialog.showError(qsTr("选择用户时发生错误: ") + e);
+            isLoading = false;
+        }
+    }
+    
+    // 加载用户数据的Timer
+    Timer {
+        id: loadingTimer
+        interval: 100 // 给UI一点时间显示加载动画
+        property string username: ""
+        
+        onTriggered: {
+            try {
+                if (backend.selectUser(username)) {
+                    userSelected = true;
+                    currentUser = username;
+                    theme.loadTheme(); // Load theme settings for the selected user
+                    loadDashboard(); // Load the dashboard content
+                    
+                    // 选择用户后检查更新
+                    backend.checkForUpdates();
+                    
+                    // 完成加载后显示主窗口
+                    mainWindow.visible = true;
+                } else {
+                    errorDialog.showError(qsTr("选择用户失败: 用户 '%1' 不存在或无法加载。").arg(username));
+                }
+                // 无论成功与否，都隐藏加载动画
+                isLoading = false;
+            } catch (e) {
+                console.error("Error in loadingTimer:", e);
+                errorDialog.showError(qsTr("加载用户数据时发生错误: ") + e);
+                isLoading = false;
+            }
         }
     }
 
@@ -104,16 +132,6 @@ ApplicationWindow {
         themeManagerInstance.loadTheme();
         // 不要在这里设置mainWindow.visible为true，让用户选择界面先显示
         // 用户选择后，selectUser函数会设置mainWindow.visible为true
-        
-        // 加载用户列表
-        var users = backend.getUsers();
-        userListModel.clear();
-        for (var i = 0; i < users.length; i++) {
-            userListModel.append({name: users[i].name});
-        }
-        if (userListModel.count > 0) {
-            userListView.currentIndex = 0;
-        }
     }
 
     // --- User Selection View ---
@@ -745,6 +763,8 @@ ApplicationWindow {
                 onClicked: {
                     userSelected = false; // 重置用户选择状态
                     currentUser = "";
+                    mainWindow.visible = false;
+                    Qt.quit(); // 退出应用并重新启动
                 }
                 ToolTip.visible: hovered
                 ToolTip.text: qsTr("切换当前活跃的用户")
@@ -989,6 +1009,32 @@ ApplicationWindow {
             Rectangle {
                 SplitView.fillWidth: true // Takes up remaining width in SplitView
                 color: bgColor // Background color from theme
+
+                // 加载动画覆盖层
+                Rectangle {
+                    id: loadingOverlay
+                    anchors.fill: parent
+                    color: Qt.rgba(theme.backgroundColor.r, theme.backgroundColor.g, theme.backgroundColor.b, 0.8)
+                    visible: isLoading
+                    z: 1000 // 确保在最上层
+
+                    BusyIndicator {
+                        id: busyIndicator
+                        anchors.centerIn: parent
+                        running: isLoading
+                        width: 80
+                        height: 80
+                    }
+                    
+                    Text {
+                        anchors.top: busyIndicator.bottom
+                        anchors.topMargin: 20
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        text: qsTr("正在加载数据，请稍候...")
+                        font.pixelSize: 16
+                        color: theme.textColor
+                    }
+                }
 
                 // StackLayout to switch between different views (Dashboard, Transactions, etc.)
                 StackLayout {

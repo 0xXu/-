@@ -167,7 +167,7 @@ class MainApplication(QObject):
         try:
             # 使用相对于 main.py 的路径
             base_dir = os.path.dirname(__file__)
-            qml_file_path = os.path.join(base_dir, "ui", "main.qml")
+            qml_file_path = os.path.join(base_dir, "ui", "app.qml") # 使用app.qml作为入口点
             qml_url = QUrl.fromLocalFile(qml_file_path) # 转换为 QUrl
             print(f"准备加载QML文件: {qml_url.toString()}")
             
@@ -186,7 +186,7 @@ class MainApplication(QObject):
                 print("没有根对象加载成功，QML加载可能失败")
         except Exception as e:
             print(f"加载QML文件出错: {e}")
-            log_qml_load_status(False, qml_path)
+            log_qml_load_status(False, qml_file_path)
             sys.exit(-1)
         
         # 运行应用程序
