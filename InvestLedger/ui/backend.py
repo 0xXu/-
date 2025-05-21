@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-from PySide6.QtCore import QObject, Signal, Slot, Property, QDate
+from PySide6.QtCore import QObject, Signal, Slot, Property, QDate, QUrl
 from PySide6.QtGui import QGuiApplication
 
 import datetime
@@ -27,6 +27,7 @@ class UIBackend(QObject):
     updateProgress = Signal(int)  # 更新下载进度
     errorOccurred = Signal(str)  # 发生错误
     messageReceived = Signal(str)  # 显示消息
+    importPreviewReady = Signal(str)  # 导入预览数据JSON字符串
     
     def __init__(self, main_app):
         super().__init__()
@@ -256,6 +257,51 @@ class UIBackend(QObject):
             })
         
         return result
+    
+    @Slot(str, str, str, result=int)
+    def getTransactionsCount(self, start_date, end_date, asset_type):
+        """获取交易记录总数，支持过滤条件"""
+        if not self.db_manager:
+            self.errorOccurred.emit("未选择用户")
+            return 0
+        
+        filters = []
+        
+        # 添加日期过滤条件
+        if start_date:
+            filters.append(('date', '>=', start_date))
+        if end_date:
+            filters.append(('date', '<=', end_date))
+        
+        # 添加资产类型过滤条件
+        if asset_type and asset_type != "全部":
+            filters.append(('asset_type', '=', asset_type))
+        
+        # 查询交易记录总数
+        try:
+            cursor = self.db_manager.conn.cursor()
+            
+            # 构建SQL查询
+            query = "SELECT COUNT(*) as count FROM transactions"
+            parameters = []
+            
+            # 处理过滤条件
+            if filters:
+                where_clauses = []
+                for field, operator, value in filters:
+                    where_clauses.append(f"{field} {operator} ?")
+                    parameters.append(value)
+                
+                if where_clauses:
+                    query += " WHERE " + " AND ".join(where_clauses)
+            
+            # 执行查询
+            cursor.execute(query, parameters)
+            result = cursor.fetchone()
+            return result['count'] if result else 0
+        except Exception as e:
+            print(f"获取交易记录总数失败: {e}")
+            return 0
     
     # 预算告警相关方法
     
@@ -527,6 +573,191 @@ class UIBackend(QObject):
                     }
                     for error in result.error_rows
                 ]
+            }
+    
+    @Slot(str, int, str, result='QVariantMap')
+    def importFromFile(self, file_url, header_row, file_type):
+        """从文件导入数据
+        
+        Args:
+            file_url: 文件URL
+            header_row: 表头行索引
+            file_type: 文件类型(csv, tsv, excel, txt)
+            
+        Returns:
+            dict: 导入结果
+        """
+        if not self.data_importer:
+            self.errorOccurred.emit("未选择用户")
+            return {"success": False, "message": "未选择用户"}
+        
+        try:
+            # 转换文件URL为本地路径
+            file_path = QUrl(file_url).toLocalFile()
+            
+            # 根据文件类型选择导入方法
+            result = self.data_importer.import_file(
+                file_path=file_path, 
+                file_type=file_type,
+                header_row=header_row
+            )
+            
+            # 保存到数据库
+            if result.success_count > 0:
+                saved_count = self.data_importer.save_imported_data(result)
+                # 通知UI更新
+                self.transactionsChanged.emit()
+                
+                # 返回结果
+                return {
+                    "success": True,
+                    "success_count": saved_count,
+                    "error_count": result.error_count,
+                    "errors": [
+                        {
+                            "row": error["row_index"],
+                            "data": str(error["row_data"]),
+                            "message": error["error_message"]
+                        }
+                        for error in result.error_rows
+                    ]
+                }
+            else:
+                return {
+                    "success": False,
+                    "message": "没有成功导入的数据",
+                    "error_count": result.error_count,
+                    "errors": [
+                        {
+                            "row": error["row_index"],
+                            "data": str(error["row_data"]),
+                            "message": error["error_message"]
+                        }
+                        for error in result.error_rows
+                    ]
+                }
+        except Exception as e:
+            self.errorOccurred.emit(f"导入文件失败: {str(e)}")
+            return {
+                "success": False,
+                "message": f"导入文件失败: {str(e)}"
+            }
+    
+    @Slot(str, str, str, int, result=str)
+    def generateFilePreview(self, file_url, file_type, delimiter=',', lines=10):
+        """生成文件预览
+        
+        Args:
+            file_url: 文件URL
+            file_type: 文件类型，可选值：'csv', 'tsv', 'excel', 'txt'
+            delimiter: 分隔符，用于CSV/TSV文件
+            lines: 预览行数
+            
+        Returns:
+            str: 预览数据JSON字符串
+        """
+        if not self.data_importer:
+            self.errorOccurred.emit("未选择用户")
+            return json.dumps({
+                "success": False,
+                "error": "未选择用户"
+            })
+        
+        try:
+            # 转换文件URL为本地路径
+            file_path = QUrl(file_url).toLocalFile()
+            
+            # 生成预览
+            preview_data = self.data_importer.generate_preview(
+                file_path, 
+                file_type=file_type,
+                delimiter=delimiter, 
+                lines=lines
+            )
+            
+            # 转换为JSON字符串
+            preview_json = json.dumps(preview_data)
+            
+            # 发送预览就绪信号
+            self.importPreviewReady.emit(preview_json)
+            
+            return preview_json
+        except Exception as e:
+            error_data = {
+                "success": False,
+                "error": str(e)
+            }
+            return json.dumps(error_data)
+    
+    @Slot(str, int, result='QVariantMap')
+    def importFromText(self, text_content, format_type_index):
+        """从文本导入数据
+        
+        Args:
+            text_content: 文本内容
+            format_type_index: 格式类型索引(0=自动识别, 1=CSV/TSV, 2=自定义格式)
+            
+        Returns:
+            dict: 导入结果
+        """
+        if not self.data_importer:
+            self.errorOccurred.emit("未选择用户")
+            return {"success": False, "message": "未选择用户"}
+        
+        try:
+            # 根据格式类型索引确定导入格式
+            format_type = "auto"
+            if format_type_index == 1:
+                # 检测是否包含制表符
+                if '\t' in text_content:
+                    format_type = "tsv"
+                else:
+                    format_type = "csv"
+            elif format_type_index == 2:
+                format_type = "custom"
+            
+            # 导入数据
+            result = self.data_importer.import_text(text_content, format_type=format_type)
+            
+            # 保存到数据库
+            if result.success_count > 0:
+                saved_count = self.data_importer.save_imported_data(result)
+                # 通知UI更新
+                self.transactionsChanged.emit()
+                
+                # 返回结果
+                return {
+                    "success": True,
+                    "success_count": saved_count,
+                    "error_count": result.error_count,
+                    "errors": [
+                        {
+                            "row": error["row_index"],
+                            "data": str(error["row_data"]),
+                            "message": error["error_message"]
+                        }
+                        for error in result.error_rows
+                    ]
+                }
+            else:
+                return {
+                    "success": False,
+                    "message": "没有成功导入的数据",
+                    "error_count": result.error_count,
+                    "errors": [
+                        {
+                            "row": error["row_index"],
+                            "data": str(error["row_data"]),
+                            "message": error["error_message"]
+                        }
+                        for error in result.error_rows
+                    ]
+                }
+        except Exception as e:
+            self.errorOccurred.emit(f"导入文本失败: {str(e)}")
+            return {
+                "success": False,
+                "message": f"导入文本失败: {str(e)}"
             }
     
     # 统计分析相关方法

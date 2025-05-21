@@ -843,11 +843,11 @@ Item {
         }
     }
     
-    // 全局信号处理
+    // 监听交易数据变化，自动刷新列表
     Connections {
         target: backend
-        
         function onTransactionsChanged() {
+            console.log("Transaction data changed, reloading transaction list...");
             loadTransactions();
         }
     }

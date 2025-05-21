@@ -11,6 +11,8 @@ import csv
 import io
 import re
 import datetime
+import pandas as pd  # 添加pandas库支持Excel文件
+import chardet        # 添加编码检测支持
 from storage import Transaction
 
 class ImportResult:
@@ -73,11 +75,15 @@ class DataImporter:
             
             for i, row in enumerate(reader, start=1):
                 try:
-                    # 转换字段名
+                    # 转换字段名，并自动去除每个字段的前后空格
                     transaction_data = {}
                     for csv_field, model_field in mapping.items():
                         if csv_field in row:
-                            transaction_data[model_field] = row[csv_field]
+                            # 自动去除前后空格
+                            value = row[csv_field]
+                            if isinstance(value, str):
+                                value = value.strip()
+                            transaction_data[model_field] = value
                     
                     # 验证必填字段
                     if self._validate_transaction_data(transaction_data):
@@ -98,21 +104,55 @@ class DataImporter:
         
         return result
     
-    def import_text(self, text_content, format_type="custom"):
-        """导入文本内容，支持多种格式"""
+    def import_text(self, text_content, format_type="auto"):
+        """导入文本内容，支持多种格式
+        
+        Args:
+            text_content: 文本内容
+            format_type: 格式类型，可选值："auto"(自动检测), "custom"(自定义), "csv", "tsv"
+            
+        Returns:
+            ImportResult: 导入结果
+        """
         result = ImportResult()
         
+        # 如果文本内容为空，直接返回
+        if not text_content or not text_content.strip():
+            result.add_error(0, {}, "文本内容为空")
+            return result
+        
+        # 自动检测格式
+        if format_type == "auto":
+            # 检查是否包含制表符，如果是则认为是TSV
+            if '\t' in text_content:
+                format_type = "tsv"
+            # 检查是否符合自定义文本格式 (更宽松的匹配)
+            elif re.search(r'(.+)[：:]\s*(盈|亏)(\d+)元?', text_content):
+                format_type = "custom"
+            # 检查是否包含逗号，如果是则认为是CSV
+            elif ',' in text_content:
+                format_type = "csv"
+            else:
+                # 默认为自定义格式
+                format_type = "custom"
+        
+        # 根据格式类型处理
         if format_type == "custom":
             # 处理自定义文本格式，如 "项目名称：盈/亏XXX元，日期"
             lines = text_content.strip().split("\n")
             
             for i, line in enumerate(lines, start=1):
                 try:
-                    transaction = self._parse_custom_text_line(line.strip())
+                    # 跳过空行
+                    if not line.strip():
+                        continue
+                        
+                    # 现在_parse_custom_text_line返回交易对象和错误信息    
+                    transaction, error_message = self._parse_custom_text_line(line.strip())
                     if transaction:
                         result.add_success(transaction)
                     else:
-                        result.add_error(i, line, "无法解析行")
+                        result.add_error(i, line, error_message or "无法解析行")
                 except Exception as e:
                     result.add_error(i, line, str(e))
         
@@ -120,6 +160,10 @@ class DataImporter:
             # 制表符分隔的数据
             return self.import_csv(text_content, delimiter='\t')
         
+        elif format_type == "csv":
+            # 逗号分隔的数据
+            return self.import_csv(text_content, delimiter=',')
+            
         return result
     
     def _parse_custom_text_line(self, line):
@@ -128,19 +172,56 @@ class DataImporter:
         例如：若羽臣：盈310元， 2025年4月10日
         """
         try:
-            # 使用正则表达式匹配模式
-            pattern = r'(.+)：(盈|亏)(\d+)元[，,]\s*(\d{4})年(\d{1,2})月(\d{1,2})日'
+            # 首先尝试匹配标准格式 - 修改以支持元后多个空格再跟逗号的情况
+            pattern = r'(.+)：(盈|亏)(\d+)元\s*[，,]\s*(\d{4})年(\d{1,2})月(\d{1,2})日'
             match = re.match(pattern, line)
             
             if not match:
-                return None
+                # 尝试匹配带冒号的更宽松格式 - 同样修改空格处理
+                pattern2 = r'(.+)[:：]?\s*(盈|亏)(\d+)元\s*[，,]?\s*(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})[日]?'
+                match = re.match(pattern2, line)
             
+            if not match:
+                # 再尝试匹配更宽松的格式，少一些约束
+                pattern3 = r'(.+)[：:]\s*(盈|亏)(\d+)[元]?\s*[，,]?\s*(\d{4})\D+(\d{1,2})\D+(\d{1,2})\D*'
+                match = re.match(pattern3, line)
+            
+            if not match:
+                # 检查可能的格式问题
+                if "：" not in line and ":" not in line:
+                    return None, "格式错误: 缺少冒号分隔项目名称与盈亏信息"
+                if "盈" not in line and "亏" not in line:
+                    return None, "格式错误: 缺少盈亏标识(盈或亏)"
+                if not re.search(r'\d+元', line):
+                    return None, "格式错误: 缺少金额或金额格式不正确"
+                if not re.search(r'\d{4}[-/年]\d{1,2}[-/月]\d{1,2}', line) and not re.search(r'\d{4}年\d{1,2}月\d{1,2}', line):
+                    return None, "格式错误: 日期格式不正确，支持的格式有YYYY年MM月DD日或YYYY-MM-DD"
+                
+                # 提取有用的信息用于调试
+                project_match = re.search(r'^(.+?)[：:]', line)
+                project_name = project_match.group(1).strip() if project_match else "未找到项目名"
+                
+                profit_match = re.search(r'(盈|亏)(\d+)', line)
+                profit_info = profit_match.group(0) if profit_match else "未找到盈亏信息"
+                
+                date_match = re.search(r'(\d{4})[\D]+(\d{1,2})[\D]+(\d{1,2})', line)
+                date_info = f"{date_match.group(1)}年{date_match.group(2)}月{date_match.group(3)}日" if date_match else "未找到日期"
+                
+                return None, f"格式不符合规范，无法正确解析。解析结果: 项目={project_name}, 盈亏={profit_info}, 日期={date_info}"
+            
+            # 提取数据并自动去除前后空格
             project_name = match.group(1).strip()
             profit_type = match.group(2)  # "盈" 或 "亏"
             amount = int(match.group(3))
             year = int(match.group(4))
             month = int(match.group(5))
             day = int(match.group(6))
+            
+            # 验证日期有效性
+            try:
+                datetime.date(year, month, day)
+            except ValueError:
+                return None, f"日期无效: {year}年{month}月{day}日不是有效日期"
             
             # 构建日期字符串 YYYY-MM-DD
             date_str = f"{year:04d}-{month:02d}-{day:02d}"
@@ -158,11 +239,11 @@ class DataImporter:
                 currency="CNY",  # 默认为人民币
                 profit_loss=profit_loss,
                 notes=line  # 原始文本作为备注
-            )
+            ), None
             
         except Exception as e:
             print(f"解析行失败: {e}")
-            return None
+            return None, f"解析失败: {str(e)}"
     
     def _validate_transaction_data(self, data):
         """验证交易数据必填字段"""
@@ -174,6 +255,11 @@ class DataImporter:
     
     def _convert_transaction_data_types(self, data):
         """转换数据类型"""
+        # 对所有字符串类型字段自动去除空格
+        for field in data:
+            if isinstance(data[field], str):
+                data[field] = data[field].strip()
+        
         # 数值类型转换
         for field in ['amount', 'unit_price', 'profit_loss']:
             if field in data and data[field]:
@@ -315,3 +401,290 @@ class DataImporter:
         """批量处理剪贴板数据"""
         result = self.import_text(clipboard_text)
         return result
+    
+    def import_excel(self, file_path, sheet_name=0, header_row=0, mapping=None):
+        """
+        导入Excel数据
+        
+        Args:
+            file_path: Excel文件路径
+            sheet_name: 工作表名称或索引，默认为第一个工作表
+            header_row: 表头行号，默认为0（第一行）
+            mapping: 字段映射，如 {'项目名称': 'project_name', '日期': 'date', ...}
+            
+        Returns:
+            ImportResult: 导入结果
+        """
+        result = ImportResult()
+        
+        # 如果没有提供字段映射，使用默认映射
+        if not mapping:
+            mapping = {
+                '日期': 'date',
+                '资产类别': 'asset_type',
+                '项目名称': 'project_name',
+                '数量': 'amount',
+                '单价': 'unit_price',
+                '币种': 'currency',
+                '盈亏': 'profit_loss',
+                '备注': 'notes'
+            }
+        
+        try:
+            # 使用pandas读取Excel文件
+            df = pd.read_excel(file_path, sheet_name=sheet_name, header=header_row)
+            
+            # 处理每一行数据
+            for i, row in df.iterrows():
+                try:
+                    # 转换字段名
+                    transaction_data = {}
+                    for excel_field, model_field in mapping.items():
+                        if excel_field in row.index:
+                            # 处理NaN值
+                            value = row[excel_field]
+                            if pd.isna(value):
+                                value = None
+                            transaction_data[model_field] = value
+                    
+                    # 验证必填字段
+                    if self._validate_transaction_data(transaction_data):
+                        # 类型转换
+                        self._convert_transaction_data_types(transaction_data)
+                        
+                        # 创建交易对象
+                        transaction = Transaction(**transaction_data)
+                        result.add_success(transaction)
+                    else:
+                        result.add_error(i + header_row + 1, row.to_dict(), "缺少必填字段")
+                        
+                except Exception as e:
+                    result.add_error(i + header_row + 1, row.to_dict(), str(e))
+        
+        except Exception as e:
+            result.add_error(0, {}, f"Excel解析错误: {str(e)}")
+        
+        return result
+    
+    def detect_encoding(self, file_path):
+        """
+        检测文件编码
+        
+        Args:
+            file_path: 文件路径
+            
+        Returns:
+            str: 检测到的编码，默认为utf-8
+        """
+        try:
+            with open(file_path, 'rb') as f:
+                raw_data = f.read(4096)  # 读取部分文件内容用于检测
+            result = chardet.detect(raw_data)
+            if result['encoding'] and result['confidence'] > 0.7:
+                return result['encoding']
+            return 'utf-8'  # 默认返回UTF-8
+        except Exception:
+            return 'utf-8'
+    
+    def import_file(self, file_path, file_type=None, delimiter=',', header_row=0, mapping=None):
+        """
+        通用文件导入方法，根据文件类型调用对应的导入方法
+        
+        Args:
+            file_path: 文件路径
+            file_type: 文件类型，可选值：'csv', 'tsv', 'excel', 'txt'
+            delimiter: 分隔符，用于CSV/TSV文件
+            header_row: 表头行索引
+            mapping: 字段映射
+            
+        Returns:
+            ImportResult: 导入结果
+        """
+        # 如果未指定文件类型，则根据扩展名判断
+        if not file_type:
+            ext = os.path.splitext(file_path)[1].lower()
+            if ext == '.csv':
+                file_type = 'csv'
+            elif ext == '.tsv':
+                file_type = 'tsv'
+            elif ext in ['.xlsx', '.xls']:
+                file_type = 'excel'
+            elif ext == '.txt':
+                file_type = 'txt'
+            else:
+                file_type = 'csv'  # 默认为CSV
+        
+        # 根据文件类型调用对应的导入方法
+        if file_type == 'excel':
+            return self.import_excel(file_path, header_row=header_row, mapping=mapping)
+        elif file_type in ['tsv', 'csv', 'txt']:
+            # 检测文件编码
+            encoding = self.detect_encoding(file_path)
+            
+            try:
+                # 读取文件内容
+                with open(file_path, 'r', encoding=encoding) as f:
+                    file_content = f.read()
+                
+                if file_type == 'tsv':
+                    return self.import_csv(file_content, delimiter='\t', mapping=mapping)
+                elif file_type == 'csv':
+                    return self.import_csv(file_content, delimiter=delimiter, mapping=mapping)
+                else:  # txt
+                    # 尝试自动检测格式
+                    return self.import_text(file_content, format_type="auto")
+            except UnicodeDecodeError:
+                # 如果编码检测失败，尝试使用不同的编码
+                for enc in ['utf-8', 'gb2312', 'gbk', 'gb18030', 'iso-8859-1']:
+                    try:
+                        with open(file_path, 'r', encoding=enc) as f:
+                            file_content = f.read()
+                        
+                        if file_type == 'tsv':
+                            return self.import_csv(file_content, delimiter='\t', mapping=mapping)
+                        elif file_type == 'csv':
+                            return self.import_csv(file_content, delimiter=delimiter, mapping=mapping)
+                        else:  # txt
+                            return self.import_text(file_content, format_type="auto")
+                    except UnicodeDecodeError:
+                        continue
+                
+                # 所有编码都失败了
+                result = ImportResult()
+                result.add_error(0, {}, "文件编码不支持，请尝试转换为UTF-8编码")
+                return result
+        else:
+            result = ImportResult()
+            result.add_error(0, {}, f"不支持的文件类型: {file_type}")
+            return result
+    
+    def generate_preview(self, file_path, file_type=None, delimiter=',', lines=10):
+        """
+        生成文件预览
+        
+        Args:
+            file_path: 文件路径
+            file_type: 文件类型，可选值：'csv', 'tsv', 'excel', 'txt'
+            delimiter: 分隔符，用于CSV/TSV文件
+            lines: 预览行数
+            
+        Returns:
+            dict: 包含预览数据和列信息的字典
+        """
+        preview_data = {
+            'success': False,
+            'headers': [],
+            'rows': [],
+            'error': None
+        }
+        
+        try:
+            # 如果未指定文件类型，则根据扩展名判断
+            if not file_type:
+                ext = os.path.splitext(file_path)[1].lower()
+                if ext == '.csv':
+                    file_type = 'csv'
+                elif ext == '.tsv':
+                    file_type = 'tsv'
+                elif ext in ['.xlsx', '.xls']:
+                    file_type = 'excel'
+                elif ext == '.txt':
+                    file_type = 'txt'
+                else:
+                    file_type = 'csv'  # 默认为CSV
+            
+            if file_type == 'excel':
+                # 使用pandas读取Excel文件
+                df = pd.read_excel(file_path, nrows=lines)
+                preview_data['headers'] = df.columns.tolist()
+                preview_data['rows'] = df.head(lines).values.tolist()
+                preview_data['success'] = True
+            
+            elif file_type in ['csv', 'tsv', 'txt']:
+                # 检测文件编码
+                encoding = self.detect_encoding(file_path)
+                
+                try:
+                    if file_type == 'csv':
+                        with open(file_path, 'r', encoding=encoding) as f:
+                            reader = csv.reader(f, delimiter=delimiter)
+                            headers = next(reader, [])
+                            preview_data['headers'] = headers
+                            
+                            rows = []
+                            for i, row in enumerate(reader):
+                                if i >= lines:
+                                    break
+                                rows.append(row)
+                            
+                            preview_data['rows'] = rows
+                            preview_data['success'] = True
+                    
+                    elif file_type == 'tsv':
+                        with open(file_path, 'r', encoding=encoding) as f:
+                            reader = csv.reader(f, delimiter='\t')
+                            headers = next(reader, [])
+                            preview_data['headers'] = headers
+                            
+                            rows = []
+                            for i, row in enumerate(reader):
+                                if i >= lines:
+                                    break
+                                rows.append(row)
+                            
+                            preview_data['rows'] = rows
+                            preview_data['success'] = True
+                    
+                    else:  # txt
+                        with open(file_path, 'r', encoding=encoding) as f:
+                            lines_data = []
+                            for i, line in enumerate(f):
+                                if i >= lines:
+                                    break
+                                lines_data.append(line.strip())
+                            
+                            preview_data['headers'] = ['内容']
+                            preview_data['rows'] = [[line] for line in lines_data]
+                            preview_data['success'] = True
+                
+                except UnicodeDecodeError:
+                    # 如果编码检测失败，尝试使用不同的编码
+                    for enc in ['utf-8', 'gb2312', 'gbk', 'gb18030', 'iso-8859-1']:
+                        try:
+                            if file_type in ['csv', 'tsv']:
+                                with open(file_path, 'r', encoding=enc) as f:
+                                    reader = csv.reader(f, delimiter=',' if file_type == 'csv' else '\t')
+                                    headers = next(reader, [])
+                                    preview_data['headers'] = headers
+                                    
+                                    rows = []
+                                    for i, row in enumerate(reader):
+                                        if i >= lines:
+                                            break
+                                        rows.append(row)
+                                    
+                                    preview_data['rows'] = rows
+                                    preview_data['success'] = True
+                                    break
+                            else:  # txt
+                                with open(file_path, 'r', encoding=enc) as f:
+                                    lines_data = []
+                                    for i, line in enumerate(f):
+                                        if i >= lines:
+                                            break
+                                        lines_data.append(line.strip())
+                                    
+                                    preview_data['headers'] = ['内容']
+                                    preview_data['rows'] = [[line] for line in lines_data]
+                                    preview_data['success'] = True
+                                    break
+                        except UnicodeDecodeError:
+                            continue
+                    
+                    if not preview_data['success']:
+                        preview_data['error'] = "文件编码不支持，请尝试转换为UTF-8编码"
+        
+        except Exception as e:
+            preview_data['error'] = f"生成预览失败: {str(e)}"
+        
+        return preview_data

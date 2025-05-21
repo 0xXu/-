@@ -528,4 +528,13 @@ Item {
             Item { height: 20 } // 底部间距
         }
     }
+
+    // 监听交易数据变化，自动刷新仪表盘
+    Connections {
+        target: backend
+        function onTransactionsChanged() {
+            console.log("Transaction data changed, reloading dashboard...");
+            loadData();
+        }
+    }
 }
