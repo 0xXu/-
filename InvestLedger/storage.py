@@ -56,6 +56,7 @@ class DatabaseManager:
     
     def __init__(self, username):
         """初始化数据库管理器"""
+        print(f"[DB] 初始化用户 {username} 的数据库管理器")
         self.app_data_dir = os.path.join(os.getenv('APPDATA'), 'InvestLedger')
         self.user_dir = os.path.join(self.app_data_dir, username)
         self.db_file = os.path.join(self.user_dir, 'data.db')
@@ -64,9 +65,40 @@ class DatabaseManager:
         # 确保用户目录存在
         Path(self.user_dir).mkdir(parents=True, exist_ok=True)
         
-        # 连接数据库并初始化表结构
-        self.conn = self._connect_db()
-        self._init_schema()
+        print(f"[DB] 数据库文件路径: {self.db_file}")
+        
+        # 尝试连接数据库，如果失败则最多重试3次
+        self.conn = None
+        retries = 3
+        while retries > 0 and self.conn is None:
+            try:
+                self.conn = self._connect_db()
+                # 如果成功连接，初始化表结构
+                self._init_schema()
+                print(f"[DB] 数据库连接成功")
+            except Exception as e:
+                print(f"[DB] 连接数据库失败 (剩余尝试: {retries-1}): {e}")
+                import traceback
+                traceback.print_exc()
+                retries -= 1
+                if retries > 0:
+                    import time
+                    time.sleep(0.5)  # 等待一段时间再重试
+        
+        if self.conn is None:
+            print("[DB] 错误: 无法连接到数据库，所有重试均失败")
+            raise Exception("数据库连接失败")
+        
+        # 验证数据库连接是否正常工作
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM transactions")
+            count = cursor.fetchone()[0]
+            print(f"[DB] 数据库验证：找到 {count} 条交易记录")
+        except Exception as e:
+            print(f"[DB] 数据库验证失败: {e}")
+            import traceback
+            traceback.print_exc()
         
         # 初始化操作历史栈
         self.undo_stack = []
@@ -382,6 +414,11 @@ class DatabaseManager:
             print(f"获取交易记录失败: {e}")
             return None
     
+    # 添加一个别名方法，用于解决命名不一致问题
+    def get_transaction_by_id(self, transaction_id):
+        """获取单条交易记录（get_transaction的别名）"""
+        return self.get_transaction(transaction_id)
+    
     def get_transactions(self, filters=None, order_by="date DESC", limit=None, offset=None):
         """获取交易记录列表，支持过滤、排序和分页"""
         cursor = self.conn.cursor()
@@ -409,9 +446,12 @@ class DatabaseManager:
                 query += f" OFFSET {offset}"
         
         try:
+            print(f"执行查询: {query} 参数: {parameters}")
             cursor.execute(query, parameters)
             rows = cursor.fetchall()
-            return [Transaction.from_dict(dict(row)) for row in rows]
+            result = [Transaction.from_dict(dict(row)) for row in rows]
+            print(f"查询成功，获取到 {len(result)} 条记录")
+            return result
         except Exception as e:
             print(f"获取交易记录列表失败: {e}")
             return []
@@ -510,4 +550,46 @@ class DatabaseManager:
             return result['goal_amount'] if result else 0
         except Exception as e:
             print(f"获取预算目标失败: {e}")
+            return 0
+            
+    def set_yearly_budget_goal(self, year, goal_amount):
+        """设置年度预算目标 - 实际上是将目标金额平均分配到每个月"""
+        cursor = self.conn.cursor()
+        try:
+            # 计算每月分配金额 - 简单平均分配
+            monthly_amount = goal_amount / 12
+            
+            # 开始事务
+            self.conn.execute("BEGIN TRANSACTION")
+            
+            # 更新该年所有月份的目标
+            for month in range(1, 13):
+                cursor.execute(
+                    "INSERT OR REPLACE INTO budget_goals (year, month, goal_amount) VALUES (?, ?, ?)",
+                    (year, month, monthly_amount)
+                )
+            
+            # 提交事务
+            self.conn.commit()
+            print(f"设置年度预算目标成功: {year}年 {goal_amount}")
+            return True
+        except Exception as e:
+            self.conn.rollback()
+            print(f"设置年度预算目标失败: {e}")
+            return False
+            
+    def get_yearly_budget_goal(self, year):
+        """获取指定年份的预算目标，计算为所有月份目标之和"""
+        cursor = self.conn.cursor()
+        try:
+            cursor.execute(
+                "SELECT SUM(goal_amount) as yearly_goal FROM budget_goals WHERE year = ?",
+                (year,)
+            )
+            result = cursor.fetchone()
+            yearly_goal = result['yearly_goal'] if result and result['yearly_goal'] is not None else 0
+            print(f"获取年度预算目标: {year}年 {yearly_goal}")
+            return yearly_goal
+        except Exception as e:
+            print(f"获取年度预算目标失败: {e}")
             return 0

@@ -16,26 +16,31 @@ import chardet        # 添加编码检测支持
 from storage import Transaction
 
 class ImportResult:
-    """导入结果类，用于保存导入状态和错误信息"""
+    """导入结果对象，包含成功和失败的记录"""
     
     def __init__(self):
-        self.success_count = 0
-        self.error_count = 0
-        self.error_rows = []  # 存储错误行及原因
-        self.parsed_data = []  # 存储成功解析的数据
+        """初始化导入结果"""
+        self.parsed_data = []  # 成功解析的数据
+        self.error_data = []   # 解析失败的数据
+        self.skipped_data = [] # 跳过的重复数据
     
     def add_success(self, data):
         """添加成功解析的数据"""
-        self.success_count += 1
         self.parsed_data.append(data)
     
     def add_error(self, row_index, row_data, error_message):
-        """添加解析失败的行"""
-        self.error_count += 1
-        self.error_rows.append({
+        """添加解析失败的数据"""
+        self.error_data.append({
             'row_index': row_index,
             'row_data': row_data,
             'error_message': error_message
+        })
+    
+    def add_skipped(self, data, reason="重复记录"):
+        """添加被跳过的数据"""
+        self.skipped_data.append({
+            'data': data,
+            'reason': reason
         })
 
 class DataImporter:
@@ -390,12 +395,48 @@ class DataImporter:
     def save_imported_data(self, import_result):
         """将导入结果保存到数据库"""
         success_count = 0
+        skipped_count = 0
         
         for transaction in import_result.parsed_data:
+            # 检查是否存在相同的交易记录（项目名称、金额和日期相同）
+            existing = self.check_duplicate_transaction(transaction)
+            if existing:
+                print(f"跳过重复的交易: {transaction.project_name}, {transaction.date}, {transaction.profit_loss}")
+                import_result.add_skipped(transaction)
+                skipped_count += 1
+                continue
+                
             if self.db_manager.add_transaction(transaction):
                 success_count += 1
         
+        if skipped_count > 0:
+            print(f"成功导入{success_count}条记录，跳过{skipped_count}条重复记录")
+        
         return success_count
+    
+    def check_duplicate_transaction(self, transaction):
+        """检查是否存在重复的交易记录
+        
+        重复的定义：项目名称、日期和盈亏金额都相同
+        
+        Args:
+            transaction: 要检查的交易记录
+            
+        Returns:
+            bool: 是否存在重复记录
+        """
+        # 构造过滤条件：项目名称、日期和盈亏金额都相同
+        filters = [
+            ('project_name', '=', transaction.project_name),
+            ('date', '=', transaction.date),
+            ('profit_loss', '=', transaction.profit_loss)
+        ]
+        
+        # 查询数据库
+        existing_transactions = self.db_manager.get_transactions(filters)
+        
+        # 如果找到记录，返回True表示存在重复
+        return len(existing_transactions) > 0
     
     def batch_process_clipboard_data(self, clipboard_text):
         """批量处理剪贴板数据"""

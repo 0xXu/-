@@ -195,16 +195,41 @@ class MainApplication(QObject):
     
     def select_user(self, username):
         """选择用户并初始化数据库"""
-        self.db_manager = DatabaseManager(username)
-        
-        # 初始化备份管理器
-        app_data_dir = os.path.join(os.getenv('APPDATA'), 'InvestLedger')
-        self.backup_manager = BackupManager(app_data_dir, username)
-        
-        # 执行自动备份
-        self._perform_auto_backup()
-        
-        return True
+        print(f"[DEBUG] 选择用户: {username}")
+        try:
+            # 如果已经有数据库连接，先关闭它
+            if self.db_manager is not None:
+                print("[DEBUG] 关闭已有数据库连接")
+                self.db_manager.close()
+            
+            # 初始化新的数据库连接
+            print(f"[DEBUG] 为用户 {username} 初始化数据库连接")
+            self.db_manager = DatabaseManager(username)
+            
+            # 验证数据库是否可用
+            try:
+                cursor = self.db_manager.conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM transactions")
+                count = cursor.fetchone()[0]
+                print(f"[DEBUG] 数据库连接验证成功，有{count}条交易记录")
+            except Exception as e:
+                print(f"[ERROR] 数据库连接验证失败: {e}")
+                # 不要在这里返回False，继续尝试初始化其他组件
+            
+            # 初始化备份管理器
+            app_data_dir = os.path.join(os.getenv('APPDATA'), 'InvestLedger')
+            self.backup_manager = BackupManager(app_data_dir, username)
+            
+            # 执行自动备份
+            self._perform_auto_backup()
+            
+            print(f"[INFO] 用户 {username} 选择成功")
+            return True
+        except Exception as e:
+            print(f"[ERROR] 选择用户失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
         
     def create_new_user(self, username):
         """创建新用户"""

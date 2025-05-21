@@ -661,7 +661,6 @@ Item {
             // 目标设置
             Rectangle {
                 Layout.fillWidth: true
-                // height: 250  // 移除固定高度
                 implicitHeight: goalSettingsLayout.implicitHeight + 30 // 根据内容自动调整高度
                 color: cardColor
                 radius: 5
@@ -670,96 +669,733 @@ Item {
                     id: goalSettingsLayout
                     anchors.fill: parent
                     anchors.margins: 15
-                    spacing: 10
+                    spacing: 15
 
                     Text {
                         text: "盈利目标设置"
                         font.pixelSize: 16
                         font.bold: true
                     }
-
-                    GridLayout {
+                    
+                    // 描述文本
+                    Text {
+                        text: "设置月度和年度盈利目标，系统将在仪表盘显示完成进度"
+                        font.pixelSize: 12
+                        color: Qt.darker(textColor, 1.2)
+                        opacity: 0.8
                         Layout.fillWidth: true
-                        columns: 3
-                        rowSpacing: 15
-                        columnSpacing: 20
+                    }
+                    
+                    // 添加分隔线
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 1
+                        color: inputBorderColor
+                        opacity: 0.5
+                        Layout.topMargin: 5
+                        Layout.bottomMargin: 5
+                    }
 
-                        Text {
-                            text: "月度目标:"
-                            font.pixelSize: labelFontSize
-                            verticalAlignment: Text.AlignVCenter
-                        }
-
-                        CustomSpinBox {
-                            id: monthlyGoalSpinBox
-                            width: buttonWidth * 1.4
-                            from: 0
-                            to: 100000000
-                            value: 5000
-                            stepSize: 100
-
-                            textFromValue: function(val, locale) {
-                                return Number(val / 100.0).toLocaleString(locale, 'f', 2)
-                            }
-
-                            valueFromText: function(txt, locale) {
-                                var num = Number.fromLocaleString(locale, txt);
-                                return Math.round(num * 100);
+                    // 月度目标设置卡片
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: monthlyGoalContent.implicitHeight + 30
+                        color: theme ? (theme.isDarkTheme ? Qt.rgba(0.2, 0.2, 0.25, 0.3) : Qt.rgba(0.97, 0.97, 1.0, 0.7)) : "#f5f5f5"
+                        radius: 8
+                        border.width: 1
+                        border.color: theme ? (theme.isDarkTheme ? Qt.rgba(0.3, 0.3, 0.5, 0.5) : Qt.rgba(0.8, 0.8, 0.9, 1.0)) : "#d0d0d0"
+                        
+                        ColumnLayout {
+                            id: monthlyGoalContent
+                            anchors.fill: parent
+                            anchors.margins: 15
+                            spacing: 15
+                            
+                            // 标题行
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 10
+                                
+                                Text {
+                                    text: "月度目标"
+                                    font.pixelSize: 15
+                                    font.bold: true
+                                    color: theme ? theme.textColor : "black"
+                                }
+                                
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    height: 1
+                                    color: theme ? (theme.isDarkTheme ? Qt.rgba(0.4, 0.4, 0.6, 0.5) : Qt.rgba(0.8, 0.8, 0.9, 0.8)) : "#d0d0d0"
+                                }
                             }
                             
-                            Component.onCompleted: {
-                                internalProps.realValue = value / 100.0;
+                            // 内容区
+                            GridLayout {
+                                Layout.fillWidth: true
+                                columns: 3
+                                rowSpacing: 15
+                                columnSpacing: 15
+                                
+                                // 金额
+                                Text {
+                                    text: "金额:"
+                                    font.pixelSize: labelFontSize
+                                    color: theme ? theme.textColor : "black"
+                                }
+                                
+                                Rectangle {
+                                    Layout.preferredWidth: 180
+                                    Layout.minimumWidth: 120
+                                    height: inputHeight
+                                    color: inputBgColor
+                                    border.color: inputBorderColor
+                                    border.width: 1
+                                    radius: inputRadius
+                                    
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        anchors.leftMargin: 5
+                                        anchors.rightMargin: 5
+                                        spacing: 0
+                                        
+                                        Text {
+                                            text: "-"
+                                            font.pixelSize: 18
+                                            color: theme ? theme.textColor : "black"
+                                            Layout.preferredWidth: 25
+                                            horizontalAlignment: Text.AlignHCenter
+                                            
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                onClicked: {
+                                                    var newValue = Math.max(0, monthlyAmountField.value - 1000);
+                                                    monthlyAmountField.text = newValue.toFixed(2);
+                                                    monthlyAmountField.value = newValue;
+                                                }
+                                            }
+                                        }
+                                        
+                                        TextInput {
+                                            id: monthlyAmountField
+                                            Layout.fillWidth: true
+                                            property real value: 5000
+                                            text: value.toFixed(2)
+                                            font.pixelSize: inputFontSize
+                                            color: inputTextColor
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: TextInput.AlignVCenter
+                                            validator: DoubleValidator { bottom: 0; notation: DoubleValidator.StandardNotation }
+                                            selectByMouse: true
+                                            
+                                            onTextChanged: {
+                                                if (text === "" || text === ".") return;
+                                                value = parseFloat(text);
+                                            }
+                                        }
+                                        
+                                        Text {
+                                            text: "+"
+                                            font.pixelSize: 18
+                                            color: theme ? theme.textColor : "black"
+                                            Layout.preferredWidth: 25
+                                            horizontalAlignment: Text.AlignHCenter
+                                            
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                onClicked: {
+                                                    var newValue = monthlyAmountField.value + 1000;
+                                                    monthlyAmountField.text = newValue.toFixed(2);
+                                                    monthlyAmountField.value = newValue;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Text {
+                                    text: "元"
+                                    font.pixelSize: labelFontSize - 2
+                                    color: Qt.darker(theme.textColor, 1.2)
+                                }
+                                
+                                // 月份
+                                Text {
+                                    text: "月份:"
+                                    font.pixelSize: labelFontSize
+                                    color: theme ? theme.textColor : "black"
+                                }
+                                
+                                ComboBox {
+                                    id: monthCombo
+                                    Layout.preferredWidth: 100
+                                    model: [
+                                        {text: "1月", value: 1}, {text: "2月", value: 2},
+                                        {text: "3月", value: 3}, {text: "4月", value: 4},
+                                        {text: "5月", value: 5}, {text: "6月", value: 6},
+                                        {text: "7月", value: 7}, {text: "8月", value: 8},
+                                        {text: "9月", value: 9}, {text: "10月", value: 10},
+                                        {text: "11月", value: 11}, {text: "12月", value: 12}
+                                    ]
+                                    textRole: "text"
+                                    valueRole: "value"
+                                    currentIndex: new Date().getMonth()
+                                    
+                                    property int selectedMonthValue: model[currentIndex].value
+                                }
+                                
+                                Item { width: 1 } // 占位
+                                
+                                // 年份
+                                Text {
+                                    text: "年份:"
+                                    font.pixelSize: labelFontSize
+                                    color: theme ? theme.textColor : "black"
+                                }
+                                
+                                Rectangle {
+                                    Layout.preferredWidth: 100
+                                    height: inputHeight
+                                    color: inputBgColor
+                                    border.color: inputBorderColor
+                                    border.width: 1
+                                    radius: inputRadius
+                                    
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        anchors.leftMargin: 5
+                                        anchors.rightMargin: 5
+                                        spacing: 0
+                                        
+                                        Text {
+                                            text: "-"
+                                            font.pixelSize: 18
+                                            color: theme ? theme.textColor : "black"
+                                            Layout.preferredWidth: 25
+                                            horizontalAlignment: Text.AlignHCenter
+                                            
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                onClicked: {
+                                                    var newValue = Math.max(2020, yearField.value - 1);
+                                                    yearField.text = newValue.toString();
+                                                    yearField.value = newValue;
+                                                }
+                                            }
+                                        }
+                                        
+                                        TextInput {
+                                            id: yearField
+                                            Layout.fillWidth: true
+                                            property int value: new Date().getFullYear()
+                                            text: value.toString()
+                                            font.pixelSize: inputFontSize
+                                            color: inputTextColor
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: TextInput.AlignVCenter
+                                            validator: IntValidator { bottom: 2020; top: 2100 }
+                                            selectByMouse: true
+                                            
+                                            onTextChanged: {
+                                                if (text === "") return;
+                                                var val = parseInt(text);
+                                                if (!isNaN(val)) value = val;
+                                            }
+                                        }
+                                        
+                                        Text {
+                                            text: "+"
+                                            font.pixelSize: 18
+                                            color: theme ? theme.textColor : "black"
+                                            Layout.preferredWidth: 25
+                                            horizontalAlignment: Text.AlignHCenter
+                                            
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                onClicked: {
+                                                    var newValue = Math.min(2100, yearField.value + 1);
+                                                    yearField.text = newValue.toString();
+                                                    yearField.value = newValue;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                Item { width: 1 } // 占位
                             }
-                            onSpinValueChanged: {
-                                internalProps.realValue = value / 100.0;
+                            
+                            // 结果反馈区
+                            Rectangle {
+                                id: monthlyGoalFeedback
+                                Layout.fillWidth: true
+                                height: 30
+                                color: isSuccess ? Qt.rgba(0.1, 0.6, 0.1, 0.1) : Qt.rgba(0.6, 0.1, 0.1, 0.1)
+                                border.color: isSuccess ? "#4caf50" : "#f44336"
+                                border.width: 1
+                                radius: 4
+                                visible: false
+                                property bool isSuccess: true
+                                
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.margins: 5
+                                    spacing: 10
+                                    
+                                    Text {
+                                        text: isSuccess ? "✓" : "✗"
+                                        font.pixelSize: 16
+                                        font.bold: true
+                                        color: isSuccess ? "#4caf50" : "#f44336"
+                                    }
+                                    
+                                    Text {
+                                        id: monthlyGoalStatusText
+                                        text: monthlyGoalFeedback.isSuccess ? 
+                                              "月度目标设置成功！" : "设置失败，请重试"
+                                        color: monthlyGoalFeedback.isSuccess ? 
+                                               "#2ecc71" : "#e74c3c"
+                                        font.pixelSize: 13
+                                        Layout.fillWidth: true
+                                    }
+                                }
+                            }
+                            
+                            // 底部按钮区
+                            Item {
+                                Layout.fillWidth: true
+                                height: 40
+                                
+                                Button {
+                                    id: monthlyGoalButton
+                                    anchors.right: parent.right
+                                    width: 120
+                                    height: 36
+                                    text: "设置月度目标"
+                                    property bool isSettingNow: false
+                                    
+                                    background: Rectangle {
+                                        color: parent.isSettingNow ? Qt.lighter(buttonBgColor, 1.3) : buttonBgColor
+                                        radius: buttonRadius
+                                        border.color: buttonBorderColor
+                                        border.width: 1
+                                    }
+                                    
+                                    contentItem: Item {
+                                        RowLayout {
+                                            anchors.centerIn: parent
+                                            spacing: 5
+                                            
+                                            BusyIndicator {
+                                                visible: monthlyGoalButton.isSettingNow
+                                                running: visible
+                                                width: 16
+                                                height: 16
+                                                Layout.preferredWidth: 16
+                                                Layout.preferredHeight: 16
+                                            }
+                                            
+                                            Text {
+                                                text: monthlyGoalButton.isSettingNow ? "设置中..." : "设置月度目标"
+                                                color: "white"
+                                                font.pixelSize: 14
+                                                font.family: buttonFontFamily
+                                            }
+                                        }
+                                    }
+                                    
+                                    Timer {
+                                        id: monthlyFeedbackTimer
+                                        interval: 3000
+                                        repeat: false
+                                        onTriggered: {
+                                            monthlyGoalFeedback.visible = false;
+                                        }
+                                    }
+                                    
+                                    Timer {
+                                        id: monthlyCooldownTimer
+                                        interval: 500
+                                        repeat: false
+                                        onTriggered: {
+                                            monthlyGoalButton.isSettingNow = false;
+                                        }
+                                    }
+                                    
+                                    onClicked: {
+                                        if (isSettingNow) return; // 防止重复点击
+                                        
+                                        // 显示设置中状态
+                                        isSettingNow = true;
+                                        
+                                        // 延迟执行设置操作
+                                        monthlyCooldownTimer.start();
+                                        
+                                        // 执行设置
+                                        var success = backend.setBudgetGoal(
+                                            yearField.value,
+                                            monthCombo.selectedMonthValue,
+                                            monthlyAmountField.value
+                                        );
+                                        
+                                        // 显示反馈
+                                        monthlyGoalFeedback.isSuccess = success;
+                                        monthlyGoalStatusText.text = success ? 
+                                                "月度目标设置成功！" : "设置失败，请重试";
+                                        monthlyGoalFeedback.visible = true;
+                                        
+                                        if (success) {
+                                            // 设置成功后发送交易变更信号，触发仪表盘刷新
+                                            backend.transactionsChanged();
+                                        }
+                                        
+                                        // 设置计时器在几秒后隐藏反馈
+                                        monthlyFeedbackTimer.start();
+                                    }
+                                }
                             }
                         }
+                    }
+                    
+                    // 年度目标设置卡片
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: yearlyGoalContent.implicitHeight + 30
+                        color: theme ? (theme.isDarkTheme ? Qt.rgba(0.2, 0.2, 0.25, 0.3) : Qt.rgba(0.97, 0.97, 1.0, 0.7)) : "#f5f5f5"
+                        radius: 8
+                        border.width: 1
+                        border.color: theme ? (theme.isDarkTheme ? Qt.rgba(0.3, 0.3, 0.5, 0.5) : Qt.rgba(0.8, 0.8, 0.9, 1.0)) : "#d0d0d0"
+                        
+                        ColumnLayout {
+                            id: yearlyGoalContent
+                            anchors.fill: parent
+                            anchors.margins: 15
+                            spacing: 15
+                            
+                            // 标题行
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 10
+                                
+                                Text {
+                                    text: "年度目标"
+                                    font.pixelSize: 15
+                                    font.bold: true
+                                    color: theme ? theme.textColor : "black"
+                                }
+                                
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    height: 1
+                                    color: theme ? (theme.isDarkTheme ? Qt.rgba(0.4, 0.4, 0.6, 0.5) : Qt.rgba(0.8, 0.8, 0.9, 0.8)) : "#d0d0d0"
+                                }
+                            }
+                            
+                            // 内容区
+                            GridLayout {
+                                Layout.fillWidth: true
+                                columns: 3
+                                rowSpacing: 15
+                                columnSpacing: 15
+                                
+                                // 金额
+                                Text {
+                                    text: "金额:"
+                                    font.pixelSize: labelFontSize
+                                    color: theme ? theme.textColor : "black"
+                                }
+                                
+                                Rectangle {
+                                    Layout.preferredWidth: 180
+                                    Layout.minimumWidth: 120
+                                    height: inputHeight
+                                    color: inputBgColor
+                                    border.color: inputBorderColor
+                                    border.width: 1
+                                    radius: inputRadius
+                                    
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        anchors.leftMargin: 5
+                                        anchors.rightMargin: 5
+                                        spacing: 0
+                                        
+                                        Text {
+                                            text: "-"
+                                            font.pixelSize: 18
+                                            color: theme ? theme.textColor : "black"
+                                            Layout.preferredWidth: 25
+                                            horizontalAlignment: Text.AlignHCenter
+                                            
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                onClicked: {
+                                                    var newValue = Math.max(0, yearlyAmountField.value - 10000);
+                                                    yearlyAmountField.text = newValue.toFixed(2);
+                                                    yearlyAmountField.value = newValue;
+                                                }
+                                            }
+                                        }
+                                        
+                                        TextInput {
+                                            id: yearlyAmountField
+                                            Layout.fillWidth: true
+                                            property real value: 50000
+                                            text: value.toFixed(2)
+                                            font.pixelSize: inputFontSize
+                                            color: inputTextColor
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: TextInput.AlignVCenter
+                                            validator: DoubleValidator { bottom: 0; notation: DoubleValidator.StandardNotation }
+                                            selectByMouse: true
+                                            
+                                            onTextChanged: {
+                                                if (text === "" || text === ".") return;
+                                                value = parseFloat(text);
+                                            }
+                                        }
+                                        
+                                        Text {
+                                            text: "+"
+                                            font.pixelSize: 18
+                                            color: theme ? theme.textColor : "black"
+                                            Layout.preferredWidth: 25
+                                            horizontalAlignment: Text.AlignHCenter
+                                            
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                onClicked: {
+                                                    var newValue = yearlyAmountField.value + 10000;
+                                                    yearlyAmountField.text = newValue.toFixed(2);
+                                                    yearlyAmountField.value = newValue;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
 
-                        CustomComboBox {
-                            id: monthCombo
-                            width: buttonWidth * 0.8
-                            model: [
-                                {text: "1月", value: 1}, {text: "2月", value: 2},
-                                {text: "3月", value: 3}, {text: "4月", value: 4},
-                                {text: "5月", value: 5}, {text: "6月", value: 6},
-                                {text: "7月", value: 7}, {text: "8月", value: 8},
-                                {text: "9月", value: 9}, {text: "10月", value: 10},
-                                {text: "11月", value: 11}, {text: "12月", value: 12}
-                            ]
-                            textRole: "text"
-                            valueRole: "value"
-                            currentIndex: new Date().getMonth()
-                        }
-
-                        Text {
-                            text: "年份:"
-                            font.pixelSize: labelFontSize
-                            verticalAlignment: Text.AlignVCenter
-                        }
-
-                        CustomSpinBox {
-                            id: yearSpinBox
-                            width: buttonWidth * 1.0
-                            from: 2020
-                            to: 2100
-                            value: new Date().getFullYear()
-                        }
-
-                        CustomButton {
-                            text: "设置月度目标"
-                            Layout.columnSpan: comportementGrid.columns > 2 ? 1 : comportementGrid.columns
-                            Layout.alignment: Qt.AlignRight
-                            onClicked: {
-                                var success = backend.setBudgetGoal(
-                                    yearSpinBox.value,
-                                    monthCombo.currentValue,
-                                    monthlyGoalSpinBox.realValue
-                                );
-
-                                if (success) {
-                                    goalSetSuccessDialog.open();
-                                } else {
-                                    errorDialog.showError("设置月度目标失败");
+                                Text {
+                                    text: "元"
+                                    font.pixelSize: labelFontSize - 2
+                                    color: Qt.darker(theme.textColor, 1.2)
+                                }
+                                
+                                // 年份
+                                Text {
+                                    text: "年份:"
+                                    font.pixelSize: labelFontSize
+                                    color: theme ? theme.textColor : "black"
+                                }
+                                
+                                Rectangle {
+                                    Layout.preferredWidth: 100
+                                    height: inputHeight
+                                    color: inputBgColor
+                                    border.color: inputBorderColor
+                                    border.width: 1
+                                    radius: inputRadius
+                                    
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        anchors.leftMargin: 5
+                                        anchors.rightMargin: 5
+                                        spacing: 0
+                                        
+                                        Text {
+                                            text: "-"
+                                            font.pixelSize: 18
+                                            color: theme ? theme.textColor : "black"
+                                            Layout.preferredWidth: 25
+                                            horizontalAlignment: Text.AlignHCenter
+                                            
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                onClicked: {
+                                                    var newValue = Math.max(2020, yearlyYearField.value - 1);
+                                                    yearlyYearField.text = newValue.toString();
+                                                    yearlyYearField.value = newValue;
+                                                }
+                                            }
+                                        }
+                                        
+                                        TextInput {
+                                            id: yearlyYearField
+                                            Layout.fillWidth: true
+                                            property int value: new Date().getFullYear()
+                                            text: value.toString()
+                                            font.pixelSize: inputFontSize
+                                            color: inputTextColor
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: TextInput.AlignVCenter
+                                            validator: IntValidator { bottom: 2020; top: 2100 }
+                                            selectByMouse: true
+                                            
+                                            onTextChanged: {
+                                                if (text === "") return;
+                                                var val = parseInt(text);
+                                                if (!isNaN(val)) value = val;
+                                            }
+                                        }
+                                        
+                                        Text {
+                                            text: "+"
+                                            font.pixelSize: 18
+                                            color: theme ? theme.textColor : "black"
+                                            Layout.preferredWidth: 25
+                                            horizontalAlignment: Text.AlignHCenter
+                                            
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                onClicked: {
+                                                    var newValue = Math.min(2100, yearlyYearField.value + 1);
+                                                    yearlyYearField.text = newValue.toString();
+                                                    yearlyYearField.value = newValue;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                Item { width: 1 } // 占位
+                                
+                                // 说明文本
+                                Text {
+                                    Layout.columnSpan: 3
+                                    Layout.fillWidth: true
+                                    text: "注意：年度目标将平均分配到12个月"
+                                    font.pixelSize: 12
+                                    font.italic: true
+                                    color: Qt.darker(theme.textColor, 1.2)
+                                    opacity: 0.7
+                                }
+                            }
+                            
+                            // 结果反馈区
+                            Rectangle {
+                                id: yearlyGoalFeedback
+                                Layout.fillWidth: true
+                                height: 30
+                                color: isSuccess ? Qt.rgba(0.1, 0.6, 0.1, 0.1) : Qt.rgba(0.6, 0.1, 0.1, 0.1)
+                                border.color: isSuccess ? "#4caf50" : "#f44336"
+                                border.width: 1
+                                radius: 4
+                                visible: false
+                                property bool isSuccess: true
+                                
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.margins: 5
+                                    spacing: 10
+                                    
+                                    Text {
+                                        text: isSuccess ? "✓" : "✗"
+                                        font.pixelSize: 16
+                                        font.bold: true
+                                        color: isSuccess ? "#4caf50" : "#f44336"
+                                    }
+                                    
+                                    Text {
+                                        id: yearlyGoalStatusText
+                                        text: yearlyGoalFeedback.isSuccess ? 
+                                              "年度目标设置成功！" : "设置失败，请重试"
+                                        color: yearlyGoalFeedback.isSuccess ? 
+                                               "#2ecc71" : "#e74c3c"
+                                        font.pixelSize: 13
+                                        Layout.fillWidth: true
+                                    }
+                                }
+                            }
+                            
+                            // 底部按钮区
+                            Item {
+                                Layout.fillWidth: true
+                                height: 40
+                                
+                                Button {
+                                    id: yearlyGoalButton
+                                    anchors.right: parent.right
+                                    width: 120
+                                    height: 36
+                                    text: "设置年度目标"
+                                    property bool isSettingNow: false
+                                    
+                                    background: Rectangle {
+                                        color: parent.isSettingNow ? Qt.lighter(buttonBgColor, 1.3) : buttonBgColor
+                                        radius: buttonRadius
+                                        border.color: buttonBorderColor
+                                        border.width: 1
+                                    }
+                                    
+                                    contentItem: Item {
+                                        RowLayout {
+                                            anchors.centerIn: parent
+                                            spacing: 5
+                                            
+                                            BusyIndicator {
+                                                visible: yearlyGoalButton.isSettingNow
+                                                running: visible
+                                                width: 16
+                                                height: 16
+                                                Layout.preferredWidth: 16
+                                                Layout.preferredHeight: 16
+                                            }
+                                            
+                                            Text {
+                                                text: yearlyGoalButton.isSettingNow ? "设置中..." : "设置年度目标"
+                                                color: "white"
+                                                font.pixelSize: 14
+                                                font.family: buttonFontFamily
+                                            }
+                                        }
+                                    }
+                                    
+                                    Timer {
+                                        id: yearlyFeedbackTimer
+                                        interval: 3000
+                                        repeat: false
+                                        onTriggered: {
+                                            yearlyGoalFeedback.visible = false;
+                                        }
+                                    }
+                                    
+                                    Timer {
+                                        id: yearlyCooldownTimer
+                                        interval: 800
+                                        repeat: false
+                                        onTriggered: {
+                                            yearlyGoalButton.isSettingNow = false;
+                                        }
+                                    }
+                                    
+                                    onClicked: {
+                                        if (isSettingNow) return; // 防止重复点击
+                                        
+                                        // 显示设置中状态
+                                        isSettingNow = true;
+                                        
+                                        // 延迟执行设置操作
+                                        yearlyCooldownTimer.start();
+                                        
+                                        // 执行设置
+                                        var success = backend.setYearlyBudgetGoal(
+                                            yearlyYearField.value,
+                                            yearlyAmountField.value
+                                        );
+                                        
+                                        // 显示反馈
+                                        yearlyGoalFeedback.isSuccess = success;
+                                        yearlyGoalStatusText.text = success ? 
+                                                "年度目标设置成功！" : "设置失败，请重试";
+                                        yearlyGoalFeedback.visible = true;
+                                        
+                                        if (success) {
+                                            // 设置成功后发送交易变更信号，触发仪表盘刷新
+                                            backend.transactionsChanged();
+                                        }
+                                        
+                                        // 设置计时器在几秒后隐藏反馈
+                                        yearlyFeedbackTimer.start();
+                                    }
                                 }
                             }
                         }
@@ -909,18 +1545,6 @@ Item {
         }
     }
 
-    // 目标设置成功对话框
-    Dialog {
-        id: goalSetSuccessDialog
-        title: "目标设置成功"
-        standardButtons: Dialog.Ok
-        modal: true
-        contentItem: Text {
-            text: "盈利目标设置成功！"
-            wrapMode: Text.WordWrap
-        }
-    }
-    
     // 有更新可用对话框 (Ensure CustomButton and CustomCheckBox are used)
     Dialog {
         id: updateAvailableDialog

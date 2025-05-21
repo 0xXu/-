@@ -309,3 +309,55 @@ class DataAnalyzer:
             trend_data = trend_data[-count:]
         
         return trend_data
+
+    def get_monthly_profit_loss_last_year(self):
+        """
+        获取过去12个月每个月的盈亏数据。
+        返回格式: [{'month': 'YYYY-MM', 'profitLoss': float}, ...]
+        """
+        today = datetime.date.today()
+        results = []
+
+        for i in range(12):
+            # 计算每个月的时间范围
+            target_month_date = today - datetime.timedelta(days=i * 30) # 近似计算月份，然后精确
+            year = target_month_date.year
+            month = target_month_date.month
+            
+            # 确保我们总是从当前月份或更早的月份开始，倒序排列12个月
+            # 更精确的计算方式是逐月递减
+            current_target_date = datetime.date(today.year, today.month, 1)
+            if i > 0:
+                # 逐月递减
+                # (current_month - 1 - i) < 0 时，年份需要调整
+                month_offset = today.month - 1 - i # 0-indexed month
+                year_offset = 0
+                while month_offset < 0:
+                    month_offset += 12
+                    year_offset -=1
+                target_year = today.year + year_offset
+                target_month = month_offset + 1 # 1-indexed month
+                current_target_date = datetime.date(target_year, target_month, 1)
+            
+            year = current_target_date.year
+            month = current_target_date.month
+
+            month_str = f"{year}-{month:02d}"
+            
+            # 获取该月的第一天和最后一天
+            first_day_of_month = datetime.date(year, month, 1)
+            last_day_of_month = datetime.date(year, month, calendar.monthrange(year, month)[1])
+            
+            # 获取该月的盈亏总额
+            profit_loss = self.db_manager.get_total_profit_loss(
+                first_day_of_month.isoformat(), 
+                last_day_of_month.isoformat()
+            )
+            
+            results.append({
+                'month': month_str,
+                'profitLoss': profit_loss if profit_loss is not None else 0
+            })
+
+        # QML希望数据是按时间升序排列的（从最早的月份到最近的月份）
+        return sorted(results, key=lambda x: x['month'])

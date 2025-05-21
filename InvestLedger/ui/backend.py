@@ -60,10 +60,28 @@ class UIBackend(QObject):
     @Slot(str, result=bool)
     def selectUser(self, username):
         """选择用户"""
+        print(f"[UI] 选择用户: {username}")
         success = self.main_app.select_user(username)
         if success:
             self.current_user = username
             self.db_manager = self.main_app.db_manager
+            
+            # 创建数据库连接状态检查
+            try:
+                if not self.db_manager or not self.db_manager.conn:
+                    print("[ERROR] 数据库管理器或连接为空")
+                    self.errorOccurred.emit("数据库连接失败")
+                    return False
+                
+                # 测试数据库连接是否可用
+                cursor = self.db_manager.conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM transactions")
+                count = cursor.fetchone()[0]
+                print(f"[UI] 数据库连接测试成功，有 {count} 条交易记录")
+            except Exception as e:
+                print(f"[ERROR] 数据库连接测试失败: {e}")
+                self.errorOccurred.emit(f"数据库连接测试失败: {e}")
+                # 不要在这里返回False，我们仍然需要初始化其他组件
             
             # 初始化数据分析和导入器
             self.data_analyzer = DataAnalyzer(self.db_manager)
@@ -76,9 +94,27 @@ class UIBackend(QObject):
             # 初始化数据导出器
             self.data_exporter = DataExporter(self.db_manager)
             
-            # 通知UI刷新数据
+            # 多次通知UI刷新数据，确保UI捕获到信号
+            print("[UI] 发送数据变化信号...")
             self.transactionsChanged.emit()
-        return success
+            
+            # 使用延迟触发额外的信号
+            import threading
+            def delayed_notify():
+                import time
+                for i in range(3):  # 尝试多次通知
+                    time.sleep(0.5)  # 每次等待0.5秒
+                    print(f"[UI] 发送延迟数据变化信号 #{i+1}")
+                    self.transactionsChanged.emit()
+            
+            # 启动延迟通知线程
+            threading.Thread(target=delayed_notify).start()
+            
+            print(f"[UI] 用户 {username} 选择成功")
+            return True
+        else:
+            print(f"[ERROR] 选择用户 {username} 失败")
+            return False
     
     @Slot(str, result=bool)
     def deleteUser(self, username):
@@ -87,6 +123,11 @@ class UIBackend(QObject):
         if success:
             self.usersChanged.emit()
         return success
+    
+    @Slot(result=bool)
+    def getCurrentUserSelected(self):
+        """返回当前是否已选择用户"""
+        return self.current_user is not None and self.db_manager is not None
     
     # 交易记录相关方法
     
@@ -213,8 +254,11 @@ class UIBackend(QObject):
     @Slot(str, str, str, int, int, result='QVariantList')
     def getTransactions(self, start_date, end_date, asset_type, limit, offset):
         """获取交易记录列表"""
+        print(f"UI调用getTransactions: start_date={start_date}, end_date={end_date}, asset_type={asset_type}, limit={limit}, offset={offset}")
+        
         if not self.db_manager:
             self.errorOccurred.emit("未选择用户")
+            print("错误: 未选择用户")
             return []
         
         filters = []
@@ -256,6 +300,7 @@ class UIBackend(QObject):
                 "notes": trans.notes
             })
         
+        print(f"UI getTransactions 返回 {len(result)} 条记录")
         return result
     
     @Slot(str, str, str, result=int)
@@ -496,7 +541,7 @@ class UIBackend(QObject):
         result = self.data_importer.import_csv(file_content, delimiter, mapping)
         
         # 保存到数据库
-        if result.success_count > 0:
+        if len(result.parsed_data) > 0:
             saved_count = self.data_importer.save_imported_data(result)
             # 通知UI更新
             self.transactionsChanged.emit()
@@ -505,28 +550,30 @@ class UIBackend(QObject):
             return {
                 "success": True,
                 "success_count": saved_count,
-                "error_count": result.error_count,
+                "error_count": len(result.error_data),
+                "skipped_count": len(result.skipped_data),
                 "errors": [
                     {
                         "row": error["row_index"],
                         "data": str(error["row_data"]),
                         "message": error["error_message"]
                     }
-                    for error in result.error_rows
+                    for error in result.error_data
                 ]
             }
         else:
             return {
                 "success": False,
                 "message": "没有成功导入的数据",
-                "error_count": result.error_count,
+                "error_count": len(result.error_data),
+                "skipped_count": len(result.skipped_data),
                 "errors": [
                     {
                         "row": error["row_index"],
                         "data": str(error["row_data"]),
                         "message": error["error_message"]
                     }
-                    for error in result.error_rows
+                    for error in result.error_data
                 ]
             }
     
@@ -541,7 +588,7 @@ class UIBackend(QObject):
         result = self.data_importer.batch_process_clipboard_data(text)
         
         # 保存到数据库
-        if result.success_count > 0:
+        if len(result.parsed_data) > 0:
             saved_count = self.data_importer.save_imported_data(result)
             # 通知UI更新
             self.transactionsChanged.emit()
@@ -550,28 +597,30 @@ class UIBackend(QObject):
             return {
                 "success": True,
                 "success_count": saved_count,
-                "error_count": result.error_count,
+                "error_count": len(result.error_data),
+                "skipped_count": len(result.skipped_data),
                 "errors": [
                     {
                         "row": error["row_index"],
                         "data": str(error["row_data"]),
                         "message": error["error_message"]
                     }
-                    for error in result.error_rows
+                    for error in result.error_data
                 ]
             }
         else:
             return {
                 "success": False,
                 "message": "没有成功导入的数据",
-                "error_count": result.error_count,
+                "error_count": len(result.error_data),
+                "skipped_count": len(result.skipped_data),
                 "errors": [
                     {
                         "row": error["row_index"],
                         "data": str(error["row_data"]),
                         "message": error["error_message"]
                     }
-                    for error in result.error_rows
+                    for error in result.error_data
                 ]
             }
     
@@ -603,7 +652,7 @@ class UIBackend(QObject):
             )
             
             # 保存到数据库
-            if result.success_count > 0:
+            if len(result.parsed_data) > 0:
                 saved_count = self.data_importer.save_imported_data(result)
                 # 通知UI更新
                 self.transactionsChanged.emit()
@@ -612,28 +661,30 @@ class UIBackend(QObject):
                 return {
                     "success": True,
                     "success_count": saved_count,
-                    "error_count": result.error_count,
+                    "error_count": len(result.error_data),
+                    "skipped_count": len(result.skipped_data),
                     "errors": [
                         {
                             "row": error["row_index"],
                             "data": str(error["row_data"]),
                             "message": error["error_message"]
                         }
-                        for error in result.error_rows
+                        for error in result.error_data
                     ]
                 }
             else:
                 return {
                     "success": False,
                     "message": "没有成功导入的数据",
-                    "error_count": result.error_count,
+                    "error_count": len(result.error_data),
+                    "skipped_count": len(result.skipped_data),
                     "errors": [
                         {
                             "row": error["row_index"],
                             "data": str(error["row_data"]),
                             "message": error["error_message"]
                         }
-                        for error in result.error_rows
+                        for error in result.error_data
                     ]
                 }
         except Exception as e:
@@ -720,7 +771,7 @@ class UIBackend(QObject):
             result = self.data_importer.import_text(text_content, format_type=format_type)
             
             # 保存到数据库
-            if result.success_count > 0:
+            if len(result.parsed_data) > 0:
                 saved_count = self.data_importer.save_imported_data(result)
                 # 通知UI更新
                 self.transactionsChanged.emit()
@@ -729,28 +780,30 @@ class UIBackend(QObject):
                 return {
                     "success": True,
                     "success_count": saved_count,
-                    "error_count": result.error_count,
+                    "error_count": len(result.error_data),
+                    "skipped_count": len(result.skipped_data),
                     "errors": [
                         {
                             "row": error["row_index"],
                             "data": str(error["row_data"]),
                             "message": error["error_message"]
                         }
-                        for error in result.error_rows
+                        for error in result.error_data
                     ]
                 }
             else:
                 return {
                     "success": False,
                     "message": "没有成功导入的数据",
-                    "error_count": result.error_count,
+                    "error_count": len(result.error_data),
+                    "skipped_count": len(result.skipped_data),
                     "errors": [
                         {
                             "row": error["row_index"],
                             "data": str(error["row_data"]),
                             "message": error["error_message"]
                         }
-                        for error in result.error_rows
+                        for error in result.error_data
                     ]
                 }
         except Exception as e:
@@ -811,6 +864,16 @@ class UIBackend(QObject):
         
         projects = self.data_analyzer.get_top_projects(limit, is_profit, start_date, end_date)
         return projects
+    
+    @Slot(result='QVariantList')
+    def getMonthlyProfitLossLastYear(self):
+        """获取近一年每个月的盈亏数据"""
+        if not self.data_analyzer:
+            self.errorOccurred.emit("未选择用户")
+            return []
+        
+        monthly_data = self.data_analyzer.get_monthly_profit_loss_last_year()
+        return monthly_data
     
     # 预算目标相关方法
     

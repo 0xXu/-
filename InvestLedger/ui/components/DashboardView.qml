@@ -8,10 +8,34 @@ Item {
     
     property bool hasData: false // 用于跟踪是否有数据
     property var totalStats: ({}) // 总体统计数据
+    property bool userSelected: mainWindow ? mainWindow.userSelected : false // 绑定到主窗口的userSelected属性
+
+    // 添加格式化大数字的函数
+    function formatLargeNumber(value) {
+        if (value === undefined || value === null) return "0.00";
+        
+        // 转换为数字确保格式化正确
+        let num = Number(value);
+        
+        // 检查是否为有效数字
+        if (isNaN(num)) return "0.00";
+        
+        // 格式化逻辑：大于1百万显示为x.xx M，大于1千显示为x.xx K
+        if (Math.abs(num) >= 1000000) {
+            return (num / 1000000).toFixed(2) + " M";
+        } else if (Math.abs(num) >= 1000) {
+            return (num / 1000).toFixed(2) + " K";
+        } else {
+            return num.toFixed(2);
+        }
+    }
 
     // 当视图被加载时获取数据
     Component.onCompleted: {
         loadData();
+        
+        // 添加延迟重新加载计时器，而不是使用setTimeout
+        secondLoadTimer.start();
     }
 
     Timer {
@@ -27,110 +51,162 @@ Item {
         }
     }
     
+    // 添加数据刷新定时器
+    Timer {
+        id: refreshTimer
+        interval: 2000 // 2秒后检查数据
+        running: true
+        repeat: false
+        onTriggered: {
+            if (!hasData && backend.getCurrentUserSelected()) {
+                console.log("刷新计时器触发数据加载");
+                loadData();
+            }
+        }
+    }
+    
+    // 二次加载计时器
+    Timer {
+        id: secondLoadTimer
+        interval: 1000  // 延迟1秒
+        repeat: false
+        onTriggered: {
+            if (!hasData && backend.getCurrentUserSelected()) {
+                console.log("尝试二次加载仪表盘数据...");
+                loadData();
+            }
+        }
+    }
+    
     function loadData() {
-        // 如果未选择用户，不加载数据，并确保显示空状态
-        if (!userSelected) {
+        console.log("开始加载仪表盘数据...");
+        
+        // 修改为强制检查外部用户选择状态
+        var externalUserSelected = true; // 假设外部状态为选择了用户
+        try {
+            // 尝试访问main.qml中的userSelected属性
+            externalUserSelected = backend.getCurrentUserSelected();
+            console.log("外部用户选择状态: " + externalUserSelected);
+        } catch (e) {
+            console.error("获取外部用户选择状态失败: " + e);
+        }
+        
+        // 使用本地状态和外部状态的组合决定
+        if (!userSelected && !externalUserSelected) {
+            console.log("未选择用户，显示空状态");
             hasData = false;
             emptyStateOverlay.visible = true;
             dashboardContent.visible = false;
             return;
         }
         
-        // 获取当前日期
-        var today = new Date();
-        var year = today.getFullYear();
-        var month = today.getMonth() + 1;
-        var lastYear = year - 1;
-        
-        // 获取月度和年度目标比较数据
-        var monthlyGoal = backend.getMonthlyGoalComparison(year, month);
-        var yearlyGoal = backend.getYearlyGoalComparison(year);
-        
-        // 获取去年同期数据
-        var lastYearMonthlyGoal = backend.getMonthlyGoalComparison(lastYear, month);
-        var lastYearYearlyGoal = backend.getYearlyGoalComparison(lastYear);
-        
-        // 更新界面显示
-        monthlyGoalText.text = monthlyGoal.goal_amount.toFixed(2);
-        monthlyActualText.text = monthlyGoal.actual_amount.toFixed(2);
-        monthlyCompletionText.text = monthlyGoal.completion_percentage.toFixed(1) + "%";
-        monthlyProgressBar.value = Math.min(Math.abs(monthlyGoal.completion_percentage), 100) / 100;
-        
-        // 去年同期月度数据
-        if (lastYearMonthlyGoal && lastYearMonthlyGoal.actual_amount) {
-            const yoyChange = ((monthlyGoal.actual_amount - lastYearMonthlyGoal.actual_amount) / Math.abs(lastYearMonthlyGoal.actual_amount)) * 100;
-            monthlyYoYText.text = yoyChange.toFixed(1) + "%";
-            monthlyYoYText.color = yoyChange >= 0 ? profitColor : lossColor;
-        } else {
-            monthlyYoYText.text = "无同期数据";
-            monthlyYoYText.color = theme.textColor;
-        }
-        
-        // 年度数据
-        yearlyGoalText.text = yearlyGoal.goal_amount.toFixed(2);
-        yearlyActualText.text = yearlyGoal.actual_amount.toFixed(2);
-        yearlyCompletionText.text = yearlyGoal.completion_percentage.toFixed(1) + "%";
-        yearlyProgressBar.value = Math.min(Math.abs(yearlyGoal.completion_percentage), 100) / 100;
-        
-        // 去年同期年度数据
-        if (lastYearYearlyGoal && lastYearYearlyGoal.actual_amount) {
-            const annualYoyChange = ((yearlyGoal.actual_amount - lastYearYearlyGoal.actual_amount) / Math.abs(lastYearYearlyGoal.actual_amount)) * 100;
-            yearlyYoYText.text = annualYoyChange.toFixed(1) + "%";
-            yearlyYoYText.color = annualYoyChange >= 0 ? profitColor : lossColor;
-        } else {
-            yearlyYoYText.text = "无同期数据";
-            yearlyYoYText.color = theme.textColor;
-        }
-        
-        // 计算目标合理性
-        evaluateTargetReasonability(monthlyGoal, lastYearMonthlyGoal, "monthly");
-        evaluateTargetReasonability(yearlyGoal, lastYearYearlyGoal, "yearly");
-        
-        // 颜色设置：根据盈亏情况设置文本颜色
-        monthlyActualText.color = monthlyGoal.actual_amount >= 0 ? profitColor : lossColor;
-        yearlyActualText.color = yearlyGoal.actual_amount >= 0 ? profitColor : lossColor;
-        
-        // 总体统计计算
-        calculateTotalStatistics();
-        
-        // 加载趋势数据
-        var trendData = backend.getProfitLossSummary("month", null, null);
-        
-        // 加载顶级盈利项目
-        var topProfitProjects = backend.getTopProjects(5, true, null, null);
-        topProfitModel.clear();
-        for (var i = 0; i < topProfitProjects.length; i++) {
-            topProfitModel.append({
-                name: topProfitProjects[i].project_name,
-                amount: topProfitProjects[i].total_profit_loss,
-                count: topProfitProjects[i].transaction_count
-            });
-        }
-        
-        // 加载顶级亏损项目
-        var topLossProjects = backend.getTopProjects(5, false, null, null);
-        topLossModel.clear();
-        for (var j = 0; j < topLossProjects.length; j++) {
-            topLossModel.append({
-                name: topLossProjects[j].project_name,
-                amount: Math.abs(topLossProjects[j].total_profit_loss),
-                count: topLossProjects[j].transaction_count
-            });
-        }
+        try {
+            // 获取当前日期
+            var today = new Date();
+            var year = today.getFullYear();
+            var month = today.getMonth() + 1;
+            var lastYear = year - 1;
+            
+            console.log("获取月度和年度目标数据");
+            // 获取月度和年度目标比较数据
+            var monthlyGoal = backend.getMonthlyGoalComparison(year, month);
+            var yearlyGoal = backend.getYearlyGoalComparison(year);
+            
+            // 获取去年同期数据
+            var lastYearMonthlyGoal = backend.getMonthlyGoalComparison(lastYear, month);
+            var lastYearYearlyGoal = backend.getYearlyGoalComparison(lastYear);
+            
+            // 更新界面显示
+            monthlyGoalText.text = monthlyGoal.goal_amount.toFixed(2);
+            monthlyActualText.text = monthlyGoal.actual_amount.toFixed(2);
+            monthlyCompletionText.text = monthlyGoal.completion_percentage.toFixed(1) + "%";
+            monthlyProgressBar.value = Math.min(Math.abs(monthlyGoal.completion_percentage), 100) / 100;
+            
+            // 去年同期月度数据
+            if (lastYearMonthlyGoal && lastYearMonthlyGoal.actual_amount) {
+                const yoyChange = ((monthlyGoal.actual_amount - lastYearMonthlyGoal.actual_amount) / Math.abs(lastYearMonthlyGoal.actual_amount)) * 100;
+                monthlyYoYText.text = yoyChange.toFixed(1) + "%";
+                monthlyYoYText.color = yoyChange >= 0 ? profitColor : lossColor;
+            } else {
+                monthlyYoYText.text = "无同期数据";
+                monthlyYoYText.color = theme.textColor;
+            }
+            
+            // 年度数据
+            yearlyGoalText.text = yearlyGoal.goal_amount.toFixed(2);
+            yearlyActualText.text = yearlyGoal.actual_amount.toFixed(2);
+            yearlyCompletionText.text = yearlyGoal.completion_percentage.toFixed(1) + "%";
+            yearlyProgressBar.value = Math.min(Math.abs(yearlyGoal.completion_percentage), 100) / 100;
+            
+            // 去年同期年度数据
+            if (lastYearYearlyGoal && lastYearYearlyGoal.actual_amount) {
+                const annualYoyChange = ((yearlyGoal.actual_amount - lastYearYearlyGoal.actual_amount) / Math.abs(lastYearYearlyGoal.actual_amount)) * 100;
+                yearlyYoYText.text = annualYoyChange.toFixed(1) + "%";
+                yearlyYoYText.color = annualYoyChange >= 0 ? profitColor : lossColor;
+            } else {
+                yearlyYoYText.text = "无同期数据";
+                yearlyYoYText.color = theme.textColor;
+            }
+            
+            // 计算目标合理性
+            evaluateTargetReasonability(monthlyGoal, lastYearMonthlyGoal, "monthly");
+            evaluateTargetReasonability(yearlyGoal, lastYearYearlyGoal, "yearly");
+            
+            // 颜色设置：根据盈亏情况设置文本颜色
+            monthlyActualText.color = monthlyGoal.actual_amount >= 0 ? profitColor : lossColor;
+            yearlyActualText.color = yearlyGoal.actual_amount >= 0 ? profitColor : lossColor;
+            
+            // 先计算总体统计，确保在任何情况下都会执行
+            console.log("计算总体统计数据");
+            calculateTotalStatistics();
+            
+            console.log("加载趋势和项目数据");
+            // 加载趋势数据
+            var trendData = backend.getProfitLossSummary("month", null, null);
+            
+            // 加载顶级盈利项目
+            var topProfitProjects = backend.getTopProjects(5, true, null, null);
+            topProfitModel.clear();
+            for (var i = 0; i < topProfitProjects.length; i++) {
+                topProfitModel.append({
+                    name: topProfitProjects[i].project_name,
+                    amount: topProfitProjects[i].total_profit_loss,
+                    count: topProfitProjects[i].transaction_count
+                });
+            }
+            
+            // 加载顶级亏损项目
+            var topLossProjects = backend.getTopProjects(5, false, null, null);
+            topLossModel.clear();
+            for (var j = 0; j < topLossProjects.length; j++) {
+                topLossModel.append({
+                    name: topLossProjects[j].project_name,
+                    amount: Math.abs(topLossProjects[j].total_profit_loss),
+                    count: topLossProjects[j].transaction_count
+                });
+            }
 
-        // 检查是否有有效数据
-        // 获取所有交易数据，用null表示不限日期范围
-        var allTransactions = backend.getTransactions(null, null, "", 999, 0);
-        // 修改判断条件：有任何交易数据都算作有数据
-        hasData = allTransactions.length > 0 || topProfitModel.count > 0 || topLossModel.count > 0 || trendData.length > 0;
-        
-        console.log("Dashboard data check: transactions=" + allTransactions.length + 
-                    ", profit projects=" + topProfitModel.count + 
-                    ", loss projects=" + topLossModel.count + 
-                    ", trends=" + trendData.length);
-        
-        emptyStateOverlay.visible = !hasData;
-        dashboardContent.visible = hasData;
+            console.log("检查交易数据");
+            // 检查是否有有效数据 - 有任何数据就显示
+            hasData = topProfitModel.count > 0 || topLossModel.count > 0 || trendData.length > 0 || totalStats.totalTrades > 0;
+            
+            console.log("Dashboard data check: profit projects=" + topProfitModel.count + 
+                        ", loss projects=" + topLossModel.count + 
+                        ", trends=" + trendData.length +
+                        ", total trades=" + (totalStats.totalTrades || 0));
+            console.log("仪表盘有数据: " + hasData);
+            
+            // 强制刷新状态显示
+            emptyStateOverlay.visible = !hasData;
+            dashboardContent.visible = hasData;
+            
+        } catch (e) {
+            console.error("加载仪表盘数据失败: " + e);
+            // 出错时显示空状态
+            hasData = false;
+            emptyStateOverlay.visible = true;
+            dashboardContent.visible = false;
+        }
     }
     
     // 计算目标合理性分析
@@ -184,65 +260,82 @@ Item {
     
     // 计算总体统计
     function calculateTotalStatistics() {
-        // 获取所有交易数据，用null表示不限日期范围
-        var allTransactions = backend.getTransactions(null, null, "", 99999, 0);
-        
-        let totalProfit = 0;
-        let totalLoss = 0;
-        let totalNet = 0;
-        let totalInvestment = 0;
-        
-        for (let i = 0; i < allTransactions.length; i++) {
-            const profit = allTransactions[i].profit_loss;
-            if (profit > 0) {
-                totalProfit += profit;
-            } else {
-                totalLoss += Math.abs(profit);
-            }
-            totalNet += profit;
+        try {
+            // 获取所有交易数据，用null表示不限日期范围
+            var allTransactions = backend.getTransactions(null, null, "", 99999, 0);
             
-            // 假设交易金额（amount * unit_price）代表投资金额
-            if (allTransactions[i].amount && allTransactions[i].unit_price) {
-                totalInvestment += allTransactions[i].amount * allTransactions[i].unit_price;
+            let totalProfit = 0;
+            let totalLoss = 0;
+            let totalNet = 0;
+            let totalInvestment = 0;
+            let winningTrades = 0;
+            let losingTrades = 0;
+            let totalTrades = allTransactions.length;
+            
+            for (let i = 0; i < allTransactions.length; i++) {
+                const profit = allTransactions[i].profit_loss;
+                if (profit > 0) {
+                    totalProfit += profit;
+                    winningTrades++;
+                } else if (profit < 0) {
+                    totalLoss += Math.abs(profit);
+                    losingTrades++;
+                }
+                totalNet += profit;
+                
+                // 假设交易金额（amount * unit_price）代表投资金额
+                if (allTransactions[i].amount && allTransactions[i].unit_price) {
+                    totalInvestment += allTransactions[i].amount * allTransactions[i].unit_price;
+                }
             }
+            
+            // 计算胜率和盈亏比
+            const winRate = (winningTrades + losingTrades > 0) ? (winningTrades / (winningTrades + losingTrades) * 100) : 0;
+            const profitLossRatio = (losingTrades > 0 && totalLoss > 0) ? (totalProfit / winningTrades) / (totalLoss / losingTrades) : 0;
+            
+            // 计算其他指标
+            const roi = (totalInvestment > 0) ? (totalNet / totalInvestment * 100) : 0;
+            
+            // 更新界面显示 - 收益亏损
+            if (totalStatsProfitValue) totalStatsProfitValue.text = formatLargeNumber(totalProfit);
+            if (totalStatsLossValue) totalStatsLossValue.text = formatLargeNumber(totalLoss);
+            if (totalStatsNetValue) totalStatsNetValue.text = formatLargeNumber(totalNet);
+            
+            // 更新胜率和盈亏比
+            if (totalStatsWinRateValue) totalStatsWinRateValue.text = winRate.toFixed(1) + "%";
+            if (totalStatsPLRatioValue) totalStatsPLRatioValue.text = profitLossRatio.toFixed(2);
+            
+            // 更新ROI
+            if (totalStatsROIValue) totalStatsROIValue.text = roi.toFixed(2) + "%";
+            
+            // 更新交易统计
+            if (totalTradesCountValue) totalTradesCountValue.text = totalTrades.toString();
+            if (winningTradesCountValue) winningTradesCountValue.text = winningTrades.toString();
+            if (losingTradesCountValue) losingTradesCountValue.text = losingTrades.toString();
+            
+            // 设置颜色
+            if (totalStatsNetValue) totalStatsNetValue.color = totalNet >= 0 ? profitColor : lossColor;
+            if (totalStatsROIValue) totalStatsROIValue.color = roi >= 0 ? profitColor : lossColor;
+            
+            // 设置净收益条的颜色
+            if (totalStatsNetColor) {
+                totalStatsNetColor.color = totalNet >= 0 ? profitColor : lossColor;
+            }
+            
+            totalStats = {
+                net: totalNet,
+                profit: totalProfit,
+                loss: totalLoss,
+                winRate: winRate,
+                plRatio: profitLossRatio,
+                roi: roi,
+                totalTrades: totalTrades,
+                winningTrades: winningTrades,
+                losingTrades: losingTrades
+            };
+        } catch (e) {
+            console.error("计算总体统计失败: " + e);
         }
-        
-        // 计算投资回报率
-        let roi = totalInvestment > 0 ? (totalNet / totalInvestment) * 100 : 0;
-        
-        // 计算年化收益率
-        // 假设第一笔交易的日期作为起始日期
-        let annualizedReturn = 0;
-        if (allTransactions.length > 0 && totalInvestment > 0) {
-            const firstTransaction = allTransactions[allTransactions.length - 1]; // 假设按时间排序，最后一个是最早的
-            const startDate = new Date(firstTransaction.date);
-            const today = new Date();
-            
-            // 计算投资时间（以年为单位）
-            const yearsInvested = (today - startDate) / (1000 * 60 * 60 * 24 * 365);
-            
-            if (yearsInvested > 0) {
-                // 年化收益率计算公式：(1 + 总收益率)^(1/投资年数) - 1
-                annualizedReturn = (Math.pow(1 + (totalNet / totalInvestment), 1 / yearsInvested) - 1) * 100;
-            }
-        }
-        
-        // 更新UI
-        totalStatsProfit.text = totalProfit.toFixed(2);
-        totalStatsLoss.text = totalLoss.toFixed(2);
-        totalStatsNet.text = totalNet.toFixed(2);
-        totalStatsNetColor.color = totalNet >= 0 ? profitColor : lossColor;
-        totalStatsROI.text = roi.toFixed(2) + "%";
-        totalStatsAnnualReturn.text = annualizedReturn.toFixed(2) + "%";
-        
-        // 保存到属性以便其他地方使用
-        totalStats = {
-            totalProfit: totalProfit,
-            totalLoss: totalLoss,
-            totalNet: totalNet,
-            roi: roi,
-            annualizedReturn: annualizedReturn
-        };
     }
     
     // 空状态覆盖层
@@ -394,88 +487,195 @@ Item {
                     
                     GridLayout {
                         Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        columns: 6
-                        columnSpacing: 10
-                        rowSpacing: 8
+                        columns: 3 // 调整为3列布局
+                        rowSpacing: 15
+                        columnSpacing: 20
                         
-                        // 第一行标题
-                        Text { 
-                            text: "总收益"; 
-                            font.pixelSize: 12; 
-                            color: Qt.darker(theme.textColor, 1.1);
-                            Layout.alignment: Qt.AlignHCenter
+                        // 第一列：总收益和总亏损
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 10
+                            
+                            // 总收益
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Text {
+                                    id: totalStatsProfitLabel
+                                    text: "总收益"
+                                    font.pixelSize: 14
+                                }
+                                Item { Layout.fillWidth: true }
+                                Text {
+                                    id: totalStatsProfitValue
+                                    text: "0.00"
+                                    font.pixelSize: 16
+                                    font.bold: true
+                                    color: profitColor
+                                }
+                            }
+                            
+                            // 总亏损
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Text {
+                                    id: totalStatsLossLabel
+                                    text: "总亏损"
+                                    font.pixelSize: 14
+                                }
+                                Item { Layout.fillWidth: true }
+                                Text {
+                                    id: totalStatsLossValue
+                                    text: "0.00"
+                                    font.pixelSize: 16
+                                    font.bold: true
+                                    color: lossColor
+                                }
+                            }
+                            
+                            // 胜率
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Text {
+                                    id: totalStatsWinRateLabel
+                                    text: "胜率"
+                                    font.pixelSize: 14
+                                }
+                                Item { Layout.fillWidth: true }
+                                Text {
+                                    id: totalStatsWinRateValue
+                                    text: "0.0%"
+                                    font.pixelSize: 16
+                                    font.bold: true
+                                    color: theme.textColor
+                                }
+                            }
                         }
-                        Text { 
-                            text: "总亏损"; 
-                            font.pixelSize: 12; 
-                            color: Qt.darker(theme.textColor, 1.1);
-                            Layout.alignment: Qt.AlignHCenter
+                        
+                        // 第二列：净收益和ROI
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 10
+                            
+                            // 净收益
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Text {
+                                    id: totalStatsNetLabel
+                                    text: "净收益"
+                                    font.pixelSize: 14
+                                }
+                                Item { Layout.fillWidth: true }
+                                Text {
+                                    id: totalStatsNetValue
+                                    text: "0.00"
+                                    font.pixelSize: 16
+                                    font.bold: true
+                                    color: theme.textColor
+                                }
+                            }
+                            
+                            // ROI
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Text {
+                                    id: totalStatsROILabel
+                                    text: "ROI"
+                                    font.pixelSize: 14
+                                }
+                                Item { Layout.fillWidth: true }
+                                Text {
+                                    id: totalStatsROIValue
+                                    text: "0.00%"
+                                    font.pixelSize: 16
+                                    font.bold: true
+                                    color: theme.textColor
+                                }
+                            }
+                            
+                            // 盈亏比
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Text {
+                                    id: totalStatsPLRatioLabel
+                                    text: "盈亏比"
+                                    font.pixelSize: 14
+                                }
+                                Item { Layout.fillWidth: true }
+                                Text {
+                                    id: totalStatsPLRatioValue
+                                    text: "0.00"
+                                    font.pixelSize: 16
+                                    font.bold: true
+                                    color: theme.textColor
+                                }
+                            }
                         }
+                        
+                        // 第三列：交易统计
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 10
+                            
+                            // 总交易
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Text {
+                                    text: "总交易笔数"
+                                    font.pixelSize: 14
+                                }
+                                Item { Layout.fillWidth: true }
+                                Text {
+                                    id: totalTradesCountValue
+                                    text: "0"
+                                    font.pixelSize: 16
+                                    font.bold: true
+                                    color: theme.textColor
+                                }
+                            }
+                            
+                            // 盈利交易
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Text {
+                                    text: "盈利交易"
+                                    font.pixelSize: 14
+                                }
+                                Item { Layout.fillWidth: true }
+                                Text {
+                                    id: winningTradesCountValue
+                                    text: "0"
+                                    font.pixelSize: 16
+                                    font.bold: true
+                                    color: profitColor
+                                }
+                            }
+                            
+                            // 亏损交易
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Text {
+                                    text: "亏损交易"
+                                    font.pixelSize: 14
+                                }
+                                Item { Layout.fillWidth: true }
+                                Text {
+                                    id: losingTradesCountValue
+                                    text: "0"
+                                    font.pixelSize: 16
+                                    font.bold: true
+                                    color: lossColor
+                                }
+                            }
+                        }
+                        
+                        // 净收益色条 - 占据所有列
                         Rectangle {
                             id: totalStatsNetColor
-                            Layout.preferredWidth: 4
-                            Layout.fillHeight: true
-                            color: profitColor
+                            Layout.columnSpan: 3
+                            Layout.fillWidth: true
+                            height: 4
+                            color: theme.primaryColor
                             radius: 2
-                        }
-                        Text { 
-                            text: "净收益"; 
-                            font.pixelSize: 12; 
-                            color: Qt.darker(theme.textColor, 1.1);
-                            Layout.alignment: Qt.AlignHCenter
-                        }
-                        Text { 
-                            text: "投资回报率"; 
-                            font.pixelSize: 12; 
-                            color: Qt.darker(theme.textColor, 1.1);
-                            Layout.alignment: Qt.AlignHCenter
-                        }
-                        Text { 
-                            text: "年化收益率"; 
-                            font.pixelSize: 12; 
-                            color: Qt.darker(theme.textColor, 1.1);
-                            Layout.alignment: Qt.AlignHCenter
-                        }
-                        
-                        // 第二行数值
-                        Text { 
-                            id: totalStatsProfit
-                            text: "0.00"; 
-                            font.pixelSize: 16; 
-                            font.bold: true;
-                            color: profitColor;
-                            Layout.alignment: Qt.AlignHCenter
-                        }
-                        Text { 
-                            id: totalStatsLoss
-                            text: "0.00"; 
-                            font.pixelSize: 16; 
-                            font.bold: true;
-                            color: lossColor;
-                            Layout.alignment: Qt.AlignHCenter
-                        }
-                        Item { width: 4; height: 1 } // 占位
-                        Text { 
-                            id: totalStatsNet
-                            text: "0.00"; 
-                            font.pixelSize: 16; 
-                            font.bold: true;
-                            Layout.alignment: Qt.AlignHCenter
-                        }
-                        Text { 
-                            id: totalStatsROI
-                            text: "0.00%"; 
-                            font.pixelSize: 16; 
-                            font.bold: true;
-                            Layout.alignment: Qt.AlignHCenter
-                        }
-                        Text { 
-                            id: totalStatsAnnualReturn
-                            text: "0.00%"; 
-                            font.pixelSize: 16; 
-                            font.bold: true;
-                            Layout.alignment: Qt.AlignHCenter
                         }
                     }
                 }
@@ -739,7 +939,7 @@ Item {
                             clip: true
                             model: ListModel { id: topProfitModel }
                             delegate: Rectangle {
-                                width: parent.width
+                                width: parent ? parent.width : 0
                                 height: 40
                                 color: index % 2 === 0 ? "transparent" : Qt.lighter(bgColor, 1.02)
                                 
@@ -808,7 +1008,7 @@ Item {
                             clip: true
                             model: ListModel { id: topLossModel }
                             delegate: Rectangle {
-                                width: parent.width
+                                width: parent ? parent.width : 0
                                 height: 40
                                 color: index % 2 === 0 ? "transparent" : Qt.lighter(bgColor, 1.02)
                                 
@@ -862,6 +1062,17 @@ Item {
         target: backend
         function onTransactionsChanged() {
             console.log("Transaction data changed, reloading dashboard...");
+            // 使用计时器延迟加载数据，而不是使用setTimeout
+            delayedReloadTimer.start();
+        }
+    }
+    
+    // 延迟加载计时器
+    Timer {
+        id: delayedReloadTimer
+        interval: 300  // 延迟300毫秒
+        repeat: false
+        onTriggered: {
             loadData();
         }
     }

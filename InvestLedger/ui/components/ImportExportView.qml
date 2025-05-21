@@ -1004,6 +1004,7 @@ Item {
                         if (success && success.success) {
                             importSuccessDialog.successCount = success.success_count;
                             importSuccessDialog.errorCount = success.error_count;
+                            importSuccessDialog.skippedCount = success.skipped_count;
                             importSuccessDialog.errorDetails = success.errors || [];
                             importSuccessDialog.open();
                         } else {
@@ -1221,6 +1222,7 @@ Item {
                             if (success && success.success) {
                                 importSuccessDialog.successCount = success.success_count;
                                 importSuccessDialog.errorCount = success.error_count;
+                                importSuccessDialog.skippedCount = success.skipped_count;
                                 importSuccessDialog.errorDetails = success.errors || [];
                                 importSuccessDialog.open();
                             } else {
@@ -1295,6 +1297,7 @@ Item {
         
         property int successCount: 0
         property int errorCount: 0
+        property int skippedCount: 0 // 新增：跳过的重复记录数
         property var errorDetails: []
         
         contentItem: ColumnLayout {
@@ -1352,7 +1355,8 @@ Item {
                         
                         Text {
                             text: "成功导入: " + importSuccessDialog.successCount + " 条记录" + 
-                                  (importSuccessDialog.errorCount > 0 ? "，失败: " + importSuccessDialog.errorCount + " 条记录" : "")
+                                  (importSuccessDialog.errorCount > 0 ? "，失败: " + importSuccessDialog.errorCount + " 条记录" : "") +
+                                  (importSuccessDialog.skippedCount > 0 ? "，跳过: " + importSuccessDialog.skippedCount + " 条重复记录" : "")
                             wrapMode: Text.WordWrap
                             color: theme ? theme.textColor : "black"
                             font.pixelSize: 14
