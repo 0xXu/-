@@ -25,6 +25,7 @@ class UIBackend(QObject):
     importProgressChanged = Signal(int, int)  # 导入进度更新(成功数, 错误数)
     updateAvailable = Signal(str, str)  # 有更新可用(版本号, 更新说明)
     updateProgress = Signal(int)  # 更新下载进度
+    updateFinished = Signal(bool)  # 更新下载完成(成功/失败)
     errorOccurred = Signal(str)  # 发生错误
     messageReceived = Signal(str)  # 显示消息
     importPreviewReady = Signal(str)  # 导入预览数据JSON字符串
@@ -106,6 +107,9 @@ class UIBackend(QObject):
                     time.sleep(0.5)  # 每次等待0.5秒
                     print(f"[UI] 发送延迟数据变化信号 #{i+1}")
                     self.transactionsChanged.emit()
+                
+                # 选择用户后静默检查更新
+                self._check_for_updates_silently()
             
             # 启动延迟通知线程
             threading.Thread(target=delayed_notify).start()
@@ -1041,6 +1045,20 @@ class UIBackend(QObject):
     @Slot(bool, result=bool)
     def downloadUpdate(self, auto_restart):
         """下载并安装更新"""
+        if not self.main_app.update_checker.update_available:
+            return False
+        
+        # 添加进度回调
+        def progress_callback(percentage):
+            self.updateProgress.emit(percentage)
+        
+        # 添加完成回调
+        def finished_callback(success):
+            self.updateFinished.emit(success)
+        
+        # 设置回调并开始下载
+        self.main_app.update_checker.set_progress_callback(progress_callback)
+        self.main_app.update_checker.set_finished_callback(finished_callback)
         return self.main_app.update_checker.download_and_install_update(auto_restart)
     
     # 主题与外观相关方法
@@ -1280,3 +1298,137 @@ class UIBackend(QObject):
             "excel": has_excel,
             "pdf": has_pdf
         }
+    
+    # 添加支持名称和盈亏状态筛选的方法
+    @Slot(str, str, str, str, str, int, int, result='QVariantList')
+    def getFilteredTransactions(self, start_date, end_date, asset_type, name_filter, profit_loss_filter, limit, offset):
+        """获取经过筛选的交易记录"""
+        if not self.db_manager:
+            self.errorOccurred.emit("未选择用户")
+            return []
+        
+        try:
+            # 构建基本的SQL查询
+            query = """
+                SELECT id, date, asset_type, project_name, amount, unit_price, currency, profit_loss, notes
+                FROM transactions
+                WHERE 1=1
+            """
+            params = []
+            
+            # 添加日期筛选条件
+            if start_date:
+                query += " AND date >= ?"
+                params.append(start_date)
+            
+            if end_date:
+                query += " AND date <= ?"
+                params.append(end_date)
+            
+            # 添加资产类型筛选条件
+            if asset_type and asset_type != "全部":
+                query += " AND asset_type = ?"
+                params.append(asset_type)
+            
+            # 添加名称筛选条件
+            if name_filter:
+                query += " AND project_name LIKE ?"
+                params.append(f"%{name_filter}%")
+            
+            # 添加盈亏筛选条件
+            if profit_loss_filter == "profit":
+                query += " AND profit_loss >= 0"
+            elif profit_loss_filter == "loss":
+                query += " AND profit_loss < 0"
+            
+            # 添加排序和分页
+            query += " ORDER BY date DESC LIMIT ? OFFSET ?"
+            params.append(limit)
+            params.append(offset)
+            
+            # 执行查询
+            cursor = self.db_manager.conn.cursor()
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+            
+            # 转换结果为字典列表
+            result = []
+            for row in rows:
+                result.append({
+                    "id": row[0],
+                    "date": row[1],
+                    "asset_type": row[2],
+                    "project_name": row[3],
+                    "amount": row[4],
+                    "unit_price": row[5],
+                    "currency": row[6],
+                    "profit_loss": row[7],
+                    "notes": row[8]
+                })
+            
+            return result
+        except Exception as e:
+            print(f"[ERROR] 获取交易记录时发生错误: {e}")
+            self.errorOccurred.emit(f"获取交易记录失败: {e}")
+            return []
+    
+    @Slot(str, str, str, str, str, result=int)
+    def getFilteredTransactionsCount(self, start_date, end_date, asset_type, name_filter, profit_loss_filter):
+        """获取经过筛选的交易记录总数"""
+        if not self.db_manager:
+            self.errorOccurred.emit("未选择用户")
+            return 0
+        
+        try:
+            # 构建基本的SQL查询
+            query = """
+                SELECT COUNT(*) 
+                FROM transactions
+                WHERE 1=1
+            """
+            params = []
+            
+            # 添加日期筛选条件
+            if start_date:
+                query += " AND date >= ?"
+                params.append(start_date)
+            
+            if end_date:
+                query += " AND date <= ?"
+                params.append(end_date)
+            
+            # 添加资产类型筛选条件
+            if asset_type and asset_type != "全部":
+                query += " AND asset_type = ?"
+                params.append(asset_type)
+            
+            # 添加名称筛选条件
+            if name_filter:
+                query += " AND project_name LIKE ?"
+                params.append(f"%{name_filter}%")
+            
+            # 添加盈亏筛选条件
+            if profit_loss_filter == "profit":
+                query += " AND profit_loss >= 0"
+            elif profit_loss_filter == "loss":
+                query += " AND profit_loss < 0"
+            
+            # 执行查询
+            cursor = self.db_manager.conn.cursor()
+            cursor.execute(query, params)
+            count = cursor.fetchone()[0]
+            
+            return count
+        except Exception as e:
+            print(f"[ERROR] 获取交易记录总数时发生错误: {e}")
+            self.errorOccurred.emit(f"获取交易记录总数失败: {e}")
+            return 0
+
+    # 添加静默检查更新的方法
+    def _check_for_updates_silently(self):
+        """在后台静默检查更新"""
+        if self.main_app.update_checker.check_for_updates(silent=True):
+            # 有更新可用，通知UI
+            version = self.main_app.update_checker.latest_version
+            notes = self.main_app.update_checker.release_notes
+            self.updateAvailable.emit(version, notes)

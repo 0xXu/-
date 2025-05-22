@@ -11,6 +11,8 @@ import tempfile
 import threading
 import requests
 from pathlib import Path
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 class UpdateChecker:
     """更新检查器，负责检查、下载与安装更新"""
@@ -23,6 +25,65 @@ class UpdateChecker:
         self.download_url = None
         self.release_notes = None
         self.update_thread = None
+        self.progress_callback = None
+        self.finished_callback = None
+        self.download_complete = False
+        self.update_file_path = None
+        
+        # 检查是否有待安装的更新
+        self._check_pending_update()
+    
+    def _check_pending_update(self):
+        """检查是否有待安装的更新"""
+        app_data_dir = os.path.join(os.getenv('APPDATA'), 'InvestLedger')
+        update_status_file = os.path.join(app_data_dir, 'update_status.json')
+        
+        if os.path.exists(update_status_file):
+            try:
+                with open(update_status_file, 'r') as f:
+                    status = json.load(f)
+                    
+                if status.get('download_complete') and status.get('update_file'):
+                    if os.path.exists(status['update_file']):
+                        # 执行更新安装
+                        print("发现待安装的更新，正在安装...")
+                        # 创建临时目录
+                        temp_dir = tempfile.mkdtemp()
+                        
+                        # 解压更新
+                        with zipfile.ZipFile(status['update_file'], 'r') as zip_ref:
+                            zip_ref.extractall(temp_dir)
+                        
+                        # 找到解压后的应用程序根目录
+                        app_dir = self._find_app_dir(temp_dir)
+                        if app_dir:
+                            # 备份当前配置
+                            self._backup_user_data()
+                            
+                            # 获取当前程序路径
+                            current_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+                            
+                            # 安装更新：复制新文件到程序目录
+                            self._copy_update_files(app_dir, current_dir)
+                            
+                        # 清理
+                        shutil.rmtree(temp_dir, ignore_errors=True)
+                        os.remove(status['update_file'])
+                        os.remove(update_status_file)
+                        print("更新安装完成")
+            except Exception as e:
+                print(f"处理待安装更新失败: {e}")
+                # 清理失败的更新状态
+                if os.path.exists(update_status_file):
+                    os.remove(update_status_file)
+    
+    def set_progress_callback(self, callback):
+        """设置进度回调函数"""
+        self.progress_callback = callback
+    
+    def set_finished_callback(self, callback):
+        """设置完成回调函数"""
+        self.finished_callback = callback
     
     def check_for_updates(self, silent=False):
         """
@@ -30,7 +91,7 @@ class UpdateChecker:
         silent: 静默模式，不弹出提示
         """
         try:
-            response = requests.get(self.github_api_url, timeout=5)
+            response = requests.get(self.github_api_url, timeout=5, verify=False)
             if response.status_code == 200:
                 data = response.json()
                 self.latest_version = data['tag_name'].lstrip('v')
@@ -57,6 +118,8 @@ class UpdateChecker:
         auto_restart: 安装后是否自动重启
         """
         if not self.update_available or not self.download_url:
+            if self.finished_callback:
+                self.finished_callback(False)
             return False
         
         # 在后台线程中下载更新
@@ -68,50 +131,58 @@ class UpdateChecker:
     
     def _do_update(self, auto_restart):
         """执行更新过程"""
+        success = False
         try:
             # 创建临时目录
             temp_dir = tempfile.mkdtemp()
             zip_path = os.path.join(temp_dir, "update.zip")
             
             # 下载更新
-            self._download_file(self.download_url, zip_path)
+            if not self._download_file(self.download_url, zip_path):
+                raise Exception("下载更新文件失败")
             
-            # 解压更新
-            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                zip_ref.extractall(temp_dir)
+            # 将更新文件复制到应用数据目录
+            app_data_dir = os.path.join(os.getenv('APPDATA'), 'InvestLedger')
+            os.makedirs(app_data_dir, exist_ok=True)
+            update_file = os.path.join(app_data_dir, f"update_{self.latest_version}.zip")
+            shutil.copy2(zip_path, update_file)
             
-            # 找到解压后的应用程序根目录
-            app_dir = self._find_app_dir(temp_dir)
-            if not app_dir:
-                print("无法找到更新文件中的应用程序目录")
-                return False
+            # 创建更新状态文件
+            update_status = {
+                'download_complete': True,
+                'version': self.latest_version,
+                'update_file': update_file,
+                'timestamp': time.time()
+            }
             
-            # 备份当前配置
-            self._backup_user_data()
-            
-            # 获取当前程序路径
-            current_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
-            
-            # 安装更新：复制新文件到程序目录
-            self._copy_update_files(app_dir, current_dir)
+            with open(os.path.join(app_data_dir, 'update_status.json'), 'w') as f:
+                json.dump(update_status, f)
             
             # 清理临时文件
             shutil.rmtree(temp_dir, ignore_errors=True)
+            
+            # 标记下载完成
+            self.download_complete = True
+            self.update_file_path = update_file
             
             # 如果需要，重启应用程序
             if auto_restart:
                 self._restart_application()
             
-            return True
+            success = True
             
         except Exception as e:
-            print(f"更新失败: {e}")
-            return False
+            print(f"更新下载失败: {e}")
+            success = False
+        
+        # 调用完成回调
+        if self.finished_callback:
+            self.finished_callback(success)
     
     def _download_file(self, url, dest_path):
         """下载文件到指定路径"""
         try:
-            response = requests.get(url, stream=True)
+            response = requests.get(url, stream=True,verify=False)
             response.raise_for_status()
             
             total_size = int(response.headers.get('content-length', 0))
@@ -123,9 +194,14 @@ class UpdateChecker:
                         f.write(chunk)
                         downloaded_size += len(chunk)
                         
-                        # 更新下载进度（实际实现中应通过信号通知UI）
-                        progress = int(100 * downloaded_size / total_size) if total_size > 0 else 0
-                        print(f"\r下载进度: {progress}%", end='')
+                        # 更新下载进度
+                        if total_size > 0:
+                            progress = int(100 * downloaded_size / total_size)
+                            # 使用回调函数通知UI
+                            if self.progress_callback:
+                                self.progress_callback(progress)
+                            # 控制台显示
+                            print(f"\r下载进度: {progress}%", end='')
             
             print("\n下载完成")
             return True
