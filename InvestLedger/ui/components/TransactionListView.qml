@@ -1,7 +1,9 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Controls.Basic as Controls
 import Qt5Compat.GraphicalEffects
+
 
 Item {
     id: transactionListView
@@ -140,9 +142,26 @@ Item {
                 
                 // 填充模型
                 if (transactions && transactions.length > 0) {
+                    console.log("加载交易数据成功, 数量:", transactions.length);
                     for (var i = 0; i < transactions.length; i++) {
-                        transactionModel.append(transactions[i]);
+                        // 确保所有必要字段都存在
+                        var tx = transactions[i];
+                        var transaction = {
+                            id: tx.id || 0,
+                            date: tx.date || "",
+                            assetType: tx.asset_type || "",
+                            name: tx.project_name || "",
+                            profitLoss: tx.profit_loss !== undefined ? tx.profit_loss : 0,
+                            note: tx.notes || ""
+                        };
+                        
+                        // 日志调试用
+                        console.log("交易数据:", JSON.stringify(transaction));
+                        
+                        transactionModel.append(transaction);
                     }
+                } else {
+                    console.log("没有找到交易数据");
                 }
                 
                 // 获取总数
@@ -199,10 +218,11 @@ Item {
         
         // 过滤和操作栏
         Rectangle {
+            id: filterCard
             Layout.fillWidth: true
-            height: 120
             color: cardColor
             radius: 8
+            implicitHeight: filterLayout.implicitHeight + 24 // Add padding
             
             layer.enabled: true
             layer.effect: DropShadow {
@@ -214,6 +234,7 @@ Item {
             }
             
             ColumnLayout {
+                id: filterLayout
                 anchors.fill: parent
                 anchors.margins: 12
                 spacing: 8
@@ -276,27 +297,106 @@ Item {
                                 id: startDateCalendar
                                 x: 0
                                 y: parent.height
-                                width: 250 // May need adjustment for DatePicker
-                                height: 300 // May need adjustment for DatePicker
+                                width: 250 
+                                height: 300 
                                 padding: 8
                                 closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
                                 
-                                // DatePicker组件替换Calendar
-                                DatePicker {
-                                    id: startDatePicker
-                                    anchors.fill: parent
-                                    // Keep selectedDate in sync with the filter
-                                    selectedDate: startDateFilter ? new Date(startDateFilter) : new Date()
 
-                                    onAccepted: { // Use onAccepted to confirm selection
-                                        var date = selectedDate;
-                                        var dateStr = date.toLocaleDateString(Qt.locale(), "yyyy-MM-dd");
-                                        startDateInput.text = dateStr;
-                                        startDateFilter = dateStr;
-                                        startDateCalendar.close();
+                                Rectangle {
+                            anchors.fill: parent
+                            color: cardColor
+                            radius: 8
+                            ColumnLayout {
+                                anchors.fill: parent
+                                spacing: 8
+                                // 头部：月份切换
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 8
+                                    Button {
+                                        text: "◀"
+                                        onClicked: startDateCalendar.currentMonth.setMonth(startDateCalendar.currentMonth.getMonth() - 1)
                                     }
-                                    // Optional: Add a button to explicitly close/cancel or use Popup's closePolicy
+                                     Text {
+                                        text: Qt.formatDate(startDateCalendar.currentMonth, "yyyy年MM月")
+                                        font.bold: true
+                                        color: textColor
+                                        Layout.fillWidth: true
+                                        horizontalAlignment: Text.AlignHCenter
+                                    }
+                                    Button {
+                                        text: "▶"
+                                        onClicked: startDateCalendar.currentMonth.setMonth(startDateCalendar.currentMonth.getMonth() + 1)
+                                    }
                                 }
+                                // 星期栏
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Repeater {
+                                        model: ["日","一","二","三","四","五","六"]
+                                        Text {
+                                            text: modelData
+                                            color: textColor
+                                            Layout.fillWidth: true
+                                            horizontalAlignment: Text.AlignHCenter
+                                        }
+                                    }
+                                }
+                                // 日期网格
+                                GridLayout {
+                                    Layout.fillWidth: true
+                                    columns: 7
+                                    rowSpacing: 0; columnSpacing: 0
+                                    Repeater {
+                                        model: {
+                                            var date = new Date(startDateCalendar.currentMonth);
+                                            date.setDate(1);
+                                            var firstDay = date.getDay();
+                                            var daysInMonth = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+                                            var prefixDays = (firstDay + 6) % 7;
+                                            return Math.ceil((daysInMonth + prefixDays) / 7) * 7;
+                                        }
+                                        Rectangle {
+                                            Layout.fillWidth: true
+                                            height: 40
+                                            border.color: borderColor
+                                            property int dayIndex: index
+                                            property int dayNumber: {
+                                                var date = new Date(startDateCalendar.currentMonth);
+                                                date.setDate(1);
+                                                var firstDay = date.getDay();
+                                                var prefixDays = (firstDay + 6) % 7;
+                                                if (index < prefixDays || index >= prefixDays + new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate()) return -1;
+                                                return index - prefixDays + 1;
+                                            }
+                                            Text {
+                                                text: parent.dayNumber > 0 ? parent.dayNumber : ""
+                                                anchors.centerIn: parent
+                                                color: textColor
+                                            }
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                enabled: parent.dayNumber > 0
+                                                onClicked: {
+                                                    var selectedDate = new Date(startDateCalendar.currentMonth);
+                                                    selectedDate.setDate(parent.dayNumber);
+                                                    startDateInput.text = Qt.formatDate(selectedDate, "yyyy-MM-dd");
+                                                    startDateFilter = startDateInput.text;
+                                                    startDateCalendar.close();
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                Button { // 关闭按钮
+                                    text: "关闭"
+                                    Layout.fillWidth: true
+                                    onClicked: startDateCalendar.close()
+                                }
+                            }
+                        }
+                        property date currentMonth: startDateFilter ? new Date(startDateFilter) : new Date()
                             }
                         }
                     }
@@ -350,32 +450,101 @@ Item {
                             }
                             
                             // 日历弹窗
-                            Popup {
-                                id: endDateCalendar
-                                x: 0
-                                y: parent.height
-                                width: 250 // May need adjustment for DatePicker
-                                height: 300 // May need adjustment for DatePicker
-                                padding: 8
-                                closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-                                
-                                // DatePicker组件替换Calendar
-                                DatePicker {
-                                    id: endDatePicker
-                                    anchors.fill: parent
-                                    // Keep selectedDate in sync with the filter
-                                    selectedDate: endDateFilter ? new Date(endDateFilter) : new Date()
-
-                                    onAccepted: { // Use onAccepted to confirm selection
-                                        var date = selectedDate;
-                                        var dateStr = date.toLocaleDateString(Qt.locale(), "yyyy-MM-dd");
-                                        endDateInput.text = dateStr;
-                                        endDateFilter = dateStr;
-                                        endDateCalendar.close();
+                           Popup {
+                        id: endDateCalendar
+                        width: 300; height: 360
+                        padding: 8
+                        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+                        Rectangle {
+                            anchors.fill: parent
+                            color: cardColor
+                            radius: 8
+                            ColumnLayout {
+                                anchors.fill: parent
+                                spacing: 8
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 8
+                                    Button {
+                                        text: "◀"
+                                        onClicked: endDateCalendar.currentMonth.setMonth(endDateCalendar.currentMonth.getMonth() - 1)
                                     }
-                                    // Optional: Add a button to explicitly close/cancel or use Popup's closePolicy
+                                    Text {
+                                        text: Qt.formatDate(endDateCalendar.currentMonth, "yyyy年MM月")
+                                        font.bold: true
+                                        color: textColor
+                                        Layout.fillWidth: true
+                                        horizontalAlignment: Text.AlignHCenter
+                                    }
+                                    Button {
+                                        text: "▶"
+                                        onClicked: endDateCalendar.currentMonth.setMonth(endDateCalendar.currentMonth.getMonth() + 1)
+                                    }
+                                }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Repeater {
+                                        model: ["日","一","二","三","四","五","六"]
+                                        Text {
+                                            text: modelData
+                                            color: textColor
+                                            Layout.fillWidth: true
+                                            horizontalAlignment: Text.AlignHCenter
+                                        }
+                                    }
+                                }
+                                GridLayout {
+                                    Layout.fillWidth: true
+                                    columns: 7
+                                    Repeater {
+                                        model: {
+                                            var date = new Date(endDateCalendar.currentMonth);
+                                            date.setDate(1);
+                                            var firstDay = date.getDay();
+                                            var daysInMonth = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+                                            var prefixDays = (firstDay + 6) % 7;
+                                            return Math.ceil((daysInMonth + prefixDays) / 7) * 7;
+                                        }
+                                        Rectangle {
+                                            Layout.fillWidth: true
+                                            height: 40
+                                            border.color: borderColor
+                                            property int dayNumber: {
+                                                var date = new Date(endDateCalendar.currentMonth);
+                                                date.setDate(1);
+                                                var firstDay = date.getDay();
+                                                var prefixDays = (firstDay + 6) % 7;
+                                                if (index < prefixDays || index >= prefixDays + new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate()) return -1;
+                                                return index - prefixDays + 1;
+                                            }
+                                            Text {
+                                                text: parent.dayNumber > 0 ? parent.dayNumber : ""
+                                                anchors.centerIn: parent
+                                                color: textColor
+                                            }
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                enabled: parent.dayNumber > 0
+                                                onClicked: {
+                                                    var selectedDate = new Date(endDateCalendar.currentMonth);
+                                                    selectedDate.setDate(parent.dayNumber);
+                                                    endDateInput.text = Qt.formatDate(selectedDate, "yyyy-MM-dd");
+                                                    endDateFilter = endDateInput.text;
+                                                    endDateCalendar.close();
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                Button {
+                                    text: "关闭"
+                                    Layout.fillWidth: true
+                                    onClicked: endDateCalendar.close()
                                 }
                             }
+                        }
+                        property date currentMonth: endDateFilter ? new Date(endDateFilter) : new Date()
+                    }
                         }
                     }
                     
@@ -548,26 +717,57 @@ Item {
                     // 按钮区域
                     RowLayout {
                         spacing: 8
+                        Layout.alignment: Qt.AlignBottom
                         
                         // 筛选按钮
-                        Button {
-                            text: "筛选"
-                            implicitWidth: 100
-                            implicitHeight: 32
-                            
-                            onClicked: {
-                                applyFilters();
+                        Rectangle {
+                            width: 100
+                            height: 32
+                            color: Qt.rgba(0.2, 0.6, 1.0, 0.8)
+                            radius: 4
+                            border.width: 1
+                            border.color: Qt.rgba(0.2, 0.6, 1.0, 1.0)
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "筛选"
+                                color: "white"
+                                font.pixelSize: 14
+                                font.bold: true
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                onClicked: applyFilters()
+                                hoverEnabled: true
+                                onEntered: parent.color = Qt.rgba(0.2, 0.6, 1.0, 1.0)
+                                onExited: parent.color = Qt.rgba(0.2, 0.6, 1.0, 0.8)
                             }
                         }
                         
                         // 重置按钮
-                        Button {
-                            text: "重置"
-                            implicitWidth: 100
-                            implicitHeight: 32
+                        Rectangle {
+                            width: 100
+                            height: 32
+                            color: Qt.rgba(0.6, 0.6, 0.6, 0.8)
+                            radius: 4
+                            border.width: 1
+                            border.color: Qt.rgba(0.6, 0.6, 0.6, 1.0)
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "重置"
+                                color: "white"
+                                font.pixelSize: 14
+                                font.bold: true
+                            }
                             
-                            onClicked: {
-                                resetFilters();
+                            MouseArea {
+                                anchors.fill: parent
+                                onClicked: resetFilters()
+                                hoverEnabled: true
+                                onEntered: parent.color = Qt.rgba(0.6, 0.6, 0.6, 1.0)
+                                onExited: parent.color = Qt.rgba(0.6, 0.6, 0.6, 0.8)
                             }
                         }
                     }
@@ -618,14 +818,15 @@ Item {
                         anchors.fill: parent
                         anchors.leftMargin: 16
                         anchors.rightMargin: 16
-                        spacing: 0
+                        spacing: 12  // 固定列间距
                         
                         Text {
-                            Layout.preferredWidth: 100
+                            Layout.preferredWidth: 90
                             text: "日期"
                             color: textColor
                             font.pixelSize: 14
                             font.bold: true
+                            horizontalAlignment: Text.AlignHCenter  // 居中对齐
                         }
                         
                         Text {
@@ -634,32 +835,35 @@ Item {
                             color: textColor
                             font.pixelSize: 14
                             font.bold: true
-                        }
-                        
-                        Text {
-                            Layout.preferredWidth: 200
-                            Layout.fillWidth: true
-                            text: "名称"
-                            color: textColor
-                            font.pixelSize: 14
-                            font.bold: true
+                            horizontalAlignment: Text.AlignHCenter  // 居中对齐
                         }
                         
                         Text {
                             Layout.preferredWidth: 120
+                            text: "名称"
+                            color: textColor
+                            font.pixelSize: 14
+                            font.bold: true
+                            horizontalAlignment: Text.AlignHCenter  // 居中对齐
+                        }
+                        
+                        Text {
+                            Layout.preferredWidth: 100
                             text: "盈亏"
                             color: textColor
                             font.pixelSize: 14
                             font.bold: true
+                            horizontalAlignment: Text.AlignHCenter  // 居中对齐
                         }
                         
                         Text {
-                            Layout.preferredWidth: 200
                             Layout.fillWidth: true
+                            Layout.preferredWidth: 200
                             text: "备注"
                             color: textColor
                             font.pixelSize: 14
                             font.bold: true
+                            horizontalAlignment: Text.AlignHCenter  // 居中对齐
                         }
                         
                         Text {
@@ -668,83 +872,191 @@ Item {
                             color: textColor
                             font.pixelSize: 14
                             font.bold: true
+                            horizontalAlignment: Text.AlignHCenter  // 居中对齐
                         }
                     }
                 }
                 
                 // 交易列表
                 ListView {
-                    id: transactionListView
+                    id: transactionModelListView
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     clip: true
                     model: transactionModel
                     
+                    // 自定义滚动条的实现
+                    ScrollBar.vertical: null // 禁用原生滚动条
+                    
+                    // 自定义滚动条
+                    Rectangle {
+                        id: customScrollbar
+                        width: 6
+                        radius: width / 2
+                        color: "transparent" // 默认透明
+                        anchors.right: parent.right
+                        anchors.rightMargin: 2
+                        anchors.top: parent.top
+                        anchors.topMargin: 4
+                        anchors.bottom: parent.bottom
+                        anchors.bottomMargin: 4
+                        opacity: transactionModelListView.moving || scrollbarMouseArea.containsMouse ? 1.0 : 0.0
+                        
+                        Behavior on opacity {
+                            NumberAnimation { duration: 300 }
+                        }
+
+                        // 滚动条轨道背景
+                        Rectangle {
+                            anchors.fill: parent
+                            color: Qt.rgba(0, 0, 0, 0.1)
+                            radius: parent.radius
+                            visible: customScrollbar.opacity > 0
+                        }
+
+                        // 滚动条滑块
+                        Rectangle {
+                            id: scrollHandle
+                            width: parent.width
+                            radius: width / 2
+                            color: scrollbarMouseArea.pressed ? Qt.darker(primaryColor, 1.2) : primaryColor
+                            opacity: 0.7
+                            y: Math.max(0, Math.min(
+                                parent.height - height,
+                                transactionModelListView.contentY * parent.height / Math.max(1, transactionModelListView.contentHeight - transactionModelListView.height)
+                            ))
+                            height: Math.max(
+                                20, // 最小高度
+                                parent.height * transactionModelListView.height / Math.max(1, transactionModelListView.contentHeight)
+                            )
+                            visible: transactionModelListView.contentHeight > transactionModelListView.height
+                        }
+                        
+                        // 滚动条交互区域
+                        MouseArea {
+                            id: scrollbarMouseArea
+                            anchors.fill: parent
+                            anchors.leftMargin: -8
+                            anchors.rightMargin: -4
+                            hoverEnabled: true
+                            
+                            property int dragStartY: 0
+                            property int startContentY: 0
+                            
+                            onPressed: {
+                                dragStartY = mouseY;
+                                startContentY = transactionModelListView.contentY;
+                            }
+                            
+                            onPositionChanged: {
+                                if (pressed && transactionModelListView.contentHeight > transactionModelListView.height) {
+                                    var contentDelta = (mouseY - dragStartY) * transactionModelListView.contentHeight / parent.height;
+                                    transactionModelListView.contentY = Math.max(0, Math.min(
+                                        transactionModelListView.contentHeight - transactionModelListView.height,
+                                        startContentY + contentDelta
+                                    ));
+                                }
+                            }
+                            
+                            onWheel: (wheel) => {
+                                var delta = wheel.angleDelta.y / 120 * 40;
+                                transactionModelListView.contentY = Math.max(0, Math.min(
+                                    transactionModelListView.contentHeight - transactionModelListView.height,
+                                    transactionModelListView.contentY - delta
+                                ));
+                            }
+                        }
+                    }
+                    
                     delegate: Rectangle {
-                        width: transactionListView.width
+                        id: rowDelegate
+                        width: transactionModelListView.width
                         height: 50
                         color: index % 2 === 0 ? cardColor : Qt.lighter(backgroundColor, 1.02)
+                        property bool isHovered: false
                         
                         MouseArea {
+                            id: rowMouseArea
                             anchors.fill: parent
                             hoverEnabled: true
-                            onEntered: parent.color = Qt.lighter(primaryColor, 1.9)
-                            onExited: parent.color = index % 2 === 0 ? cardColor : Qt.lighter(backgroundColor, 1.02)
+                            onEntered: rowDelegate.isHovered = true
+                            onExited: rowDelegate.isHovered = false
+                        }
+                        
+                        // Update color based on isHovered property
+                        states: [
+                            State {
+                                name: "hovered"
+                                when: rowDelegate.isHovered
+                                PropertyChanges {
+                                    target: rowDelegate
+                                    color: Qt.lighter(primaryColor, 1.9)
+                                }
+                            }
+                        ]
+                        
+                        transitions: Transition {
+                            ColorAnimation { duration: 150 }
                         }
                         
                         RowLayout {
                             anchors.fill: parent
                             anchors.leftMargin: 16
                             anchors.rightMargin: 16
-                            spacing: 0
+                            spacing: 12  // 固定列间距
                             
                             // 日期
                             Text {
-                                Layout.preferredWidth: 100
-                                text: model.date
+                                Layout.preferredWidth: 90
+                                text: model.date || ""
                                 color: textColor
                                 font.pixelSize: 14
                                 elide: Text.ElideRight
+                                horizontalAlignment: Text.AlignHCenter  // 居中对齐
                             }
                             
                             // 类型
                             Text {
                                 Layout.preferredWidth: 80
-                                text: model.assetType
+                                text: model.assetType || ""
                                 color: textColor
                                 font.pixelSize: 14
                                 elide: Text.ElideRight
+                                horizontalAlignment: Text.AlignHCenter  // 居中对齐
                             }
                             
                             // 名称
                             Text {
-                                Layout.preferredWidth: 200
-                                Layout.fillWidth: true
-                                text: model.name
+                                Layout.preferredWidth: 120
+                                text: model.name || ""
                                 color: textColor
                                 font.pixelSize: 14
                                 elide: Text.ElideRight
+                                horizontalAlignment: Text.AlignHCenter  // 居中对齐
                             }
                             
                             // 盈亏
                             Item {
-                                Layout.preferredWidth: 120
+                                Layout.preferredWidth: 100
                                 height: parent.height
                                 
                                 Rectangle {
-                                    anchors.verticalCenter: parent.verticalCenter
+                                    anchors.centerIn: parent
                                     width: profitLossText.width + 16
                                     height: 28
                                     radius: 4
-                                    color: model.profitLoss >= 0 ? Qt.rgba(0.3, 0.8, 0.3, 0.1) : Qt.rgba(0.8, 0.3, 0.3, 0.1)
+                                    color: (model.profitLoss >= 0) ? Qt.rgba(0.3, 0.8, 0.3, 0.1) : Qt.rgba(0.8, 0.3, 0.3, 0.1)
                                     border.width: 1
-                                    border.color: model.profitLoss >= 0 ? Qt.rgba(0.3, 0.8, 0.3, 0.2) : Qt.rgba(0.8, 0.3, 0.3, 0.2)
+                                    border.color: (model.profitLoss >= 0) ? Qt.rgba(0.3, 0.8, 0.3, 0.2) : Qt.rgba(0.8, 0.3, 0.3, 0.2)
+                                    visible: model.profitLoss !== undefined
                                     
                                     Text {
                                         id: profitLossText
                                         anchors.centerIn: parent
-                                        text: (model.profitLoss >= 0 ? "+" : "") + model.profitLoss.toFixed(2)
-                                        color: model.profitLoss >= 0 ? profitColor : lossColor
+                                        text: (model.profitLoss !== undefined) ? 
+                                              ((model.profitLoss >= 0 ? "+" : "") + model.profitLoss.toFixed(2)) : 
+                                              ""
+                                        color: (model.profitLoss >= 0) ? profitColor : lossColor
                                         font.pixelSize: 14
                                         font.bold: true
                                     }
@@ -759,6 +1071,7 @@ Item {
                                 color: textColor
                                 font.pixelSize: 14
                                 elide: Text.ElideRight
+                                horizontalAlignment: Text.AlignHCenter  // 居中对齐
                             }
                             
                             // 操作按钮
@@ -768,10 +1081,11 @@ Item {
                                 
                                 // 编辑按钮
                                 Rectangle {
+                                    id: editButton
                                     width: 36
                                     height: 28
                                     radius: 4
-                                    color: Qt.rgba(0.2, 0.6, 1.0, 0.1)
+                                    color: editButtonMouseArea.containsMouse ? Qt.rgba(0.2, 0.6, 1.0, 0.2) : Qt.rgba(0.2, 0.6, 1.0, 0.1)
                                     border.width: 1
                                     border.color: Qt.rgba(0.2, 0.6, 1.0, 0.3)
                                     
@@ -783,29 +1097,32 @@ Item {
                                     }
                                     
                                     MouseArea {
+                                        id: editButtonMouseArea
                                         anchors.fill: parent
                                         onClicked: {
                                             editTransactionDialog.transactionId = model.id;
-                                            editTransactionDialog.transactionDate = model.date;
-                                            editTransactionDialog.transactionAssetType = model.assetType;
-                                            editTransactionDialog.transactionName = model.name;
-                                            editTransactionDialog.transactionProfitLoss = model.profitLoss;
+                                            editTransactionDialog.transactionDate = model.date || "";
+                                            editTransactionDialog.transactionAssetType = model.assetType || "";
+                                            editTransactionDialog.transactionName = model.name || "";
+                                            editTransactionDialog.transactionProfitLoss = model.profitLoss || 0;
                                             editTransactionDialog.transactionNote = model.note || "";
                                             editTransactionDialog.open();
                                         }
                                         
                                         hoverEnabled: true
-                                        onEntered: parent.opacity = 0.8
-                                        onExited: parent.opacity = 1.0
+                                        // 不再改变父级的 opacity，而是控制自己的颜色
+                                        onEntered: rowDelegate.isHovered = true
+                                        onExited: if (!deleteButtonMouseArea.containsMouse) rowDelegate.isHovered = false
                                     }
                                 }
                                 
                                 // 删除按钮
                                 Rectangle {
+                                    id: deleteButton
                                     width: 36
                                     height: 28
                                     radius: 4
-                                    color: Qt.rgba(0.9, 0.3, 0.3, 0.1)
+                                    color: deleteButtonMouseArea.containsMouse ? Qt.rgba(0.9, 0.3, 0.3, 0.2) : Qt.rgba(0.9, 0.3, 0.3, 0.1)
                                     border.width: 1
                                     border.color: Qt.rgba(0.9, 0.3, 0.3, 0.3)
                                     
@@ -817,24 +1134,22 @@ Item {
                                     }
                                     
                                     MouseArea {
+                                        id: deleteButtonMouseArea
                                         anchors.fill: parent
                                         onClicked: {
                                             deleteConfirmDialog.transactionId = model.id;
-                                            deleteConfirmDialog.transactionName = model.name;
+                                            deleteConfirmDialog.transactionName = model.name || "此交易";
                                             deleteConfirmDialog.open();
                                         }
                                         
                                         hoverEnabled: true
-                                        onEntered: parent.opacity = 0.8
-                                        onExited: parent.opacity = 1.0
+                                        // 不再改变父级的 opacity，而是控制自己的颜色
+                                        onEntered: rowDelegate.isHovered = true
+                                        onExited: if (!editButtonMouseArea.containsMouse) rowDelegate.isHovered = false
                                     }
                                 }
                             }
                         }
-                    }
-                    
-                    ScrollBar.vertical: ScrollBar {
-                        active: true
                     }
                 }
             }
@@ -906,6 +1221,8 @@ Item {
         title: "编辑交易"
         modal: true
         standardButtons: Dialog.Save | Dialog.Cancel
+        // Adjust dialog width for better spacing
+        width: Math.min(mainWindow.width * 0.8, 480) 
         
         property int transactionId: 0
         property string transactionDate: ""
@@ -913,10 +1230,26 @@ Item {
         property string transactionName: ""
         property real transactionProfitLoss: 0
         property string transactionNote: ""
+
+        // Custom header for better styling
+        header: Rectangle {
+            implicitWidth: parent.width
+            implicitHeight: 48
+            color: primaryColor // Use theme color
+
+            Text {
+                anchors.centerIn: parent
+                text: editTransactionDialog.title
+                color: "white"
+                font.pixelSize: 16
+                font.bold: true
+            }
+        }
         
-        // 内容区域
+        // Content area with improved layout
         ColumnLayout {
-            width: 400
+            width: parent.width - 32 // Add some padding
+            anchors.horizontalCenter: parent.horizontalCenter
             spacing: 16
             
             // 日期
@@ -925,26 +1258,25 @@ Item {
                 spacing: 4
                 
                 Text {
-                    text: "日期"
+                    text: "日期 (YYYY-MM-DD)"
                     color: textColor
+                    font.pixelSize: 12
                 }
                 
-                Rectangle {
+                TextField {
+                    id: editDateInput
                     Layout.fillWidth: true
                     height: 36
-                    border.width: 1
-                    border.color: borderColor
-                    radius: 4
-                    
-                    TextInput {
-                        id: editDateInput
-                        anchors.fill: parent
-                        anchors.leftMargin: 8
-                        anchors.rightMargin: 8
-                        verticalAlignment: TextInput.AlignVCenter
-                        color: textColor
-                        selectByMouse: true
-                        text: editTransactionDialog.transactionDate
+                    text: editTransactionDialog.transactionDate
+                    validator: RegularExpressionValidator { regularExpression: /^\d{4}-\d{2}-\d{2}$/ }
+                    placeholderText: "例如: 2023-01-15"
+                    selectByMouse: true
+                    // 样式设置
+                    background: Rectangle {
+                        color: "white"
+                        border.width: 1
+                        border.color: borderColor
+                        radius: 4
                     }
                 }
             }
@@ -957,20 +1289,34 @@ Item {
                 Text {
                     text: "资产类型"
                     color: textColor
+                    font.pixelSize: 12
                 }
                 
                 ComboBox {
                     id: editAssetTypeCombo
                     Layout.fillWidth: true
+                    height: 36
                     model: assetTypeModel
                     textRole: "name"
+                    background: Rectangle {
+                        color: "white"
+                        border.color: borderColor
+                        border.width: 1
+                        radius: 4
+                    }
                     currentIndex: {
                         for (var i = 0; i < assetTypeModel.count; i++) {
                             if (assetTypeModel.get(i).name === editTransactionDialog.transactionAssetType) {
                                 return i;
                             }
                         }
-                        return 0;
+                        // Try to find by value if name match fails or is '全部'
+                        for (var k = 0; k < assetTypeModel.count; k++) {
+                             if (assetTypeModel.get(k).value === editTransactionDialog.transactionAssetType) {
+                                return k;
+                            }
+                        }
+                        return 0; // Default to first item if not found
                     }
                 }
             }
@@ -983,24 +1329,22 @@ Item {
                 Text {
                     text: "名称"
                     color: textColor
+                    font.pixelSize: 12
                 }
                 
-                Rectangle {
+                TextField {
+                    id: editNameInput
                     Layout.fillWidth: true
                     height: 36
-                    border.width: 1
-                    border.color: borderColor
-                    radius: 4
-                    
-                    TextInput {
-                        id: editNameInput
-                        anchors.fill: parent
-                        anchors.leftMargin: 8
-                        anchors.rightMargin: 8
-                        verticalAlignment: TextInput.AlignVCenter
-                        color: textColor
-                        selectByMouse: true
-                        text: editTransactionDialog.transactionName
+                    text: editTransactionDialog.transactionName
+                    placeholderText: "例如: 阿里巴巴股票"
+                    selectByMouse: true
+                    // 样式设置
+                    background: Rectangle {
+                        color: "white" 
+                        border.width: 1
+                        border.color: borderColor
+                        radius: 4
                     }
                 }
             }
@@ -1011,27 +1355,25 @@ Item {
                 spacing: 4
                 
                 Text {
-                    text: "盈亏"
+                    text: "盈亏 (正数为盈利, 负数为亏损)"
                     color: textColor
+                    font.pixelSize: 12
                 }
                 
-                Rectangle {
+                TextField {
+                    id: editProfitLossInput
                     Layout.fillWidth: true
                     height: 36
-                    border.width: 1
-                    border.color: borderColor
-                    radius: 4
-                    
-                    TextInput {
-                        id: editProfitLossInput
-                        anchors.fill: parent
-                        anchors.leftMargin: 8
-                        anchors.rightMargin: 8
-                        verticalAlignment: TextInput.AlignVCenter
-                        color: textColor
-                        selectByMouse: true
-                        text: editTransactionDialog.transactionProfitLoss.toString()
-                        validator: DoubleValidator {}
+                    text: editTransactionDialog.transactionProfitLoss.toFixed(2) // Format to 2 decimal places
+                    validator: DoubleValidator { bottom: -Infinity; top: Infinity; decimals: 2; notation: DoubleValidator.StandardNotation }
+                    placeholderText: "例如: 100.50 或 -50.25"
+                    selectByMouse: true
+                    // 样式设置
+                    background: Rectangle {
+                        color: "white"
+                        border.width: 1
+                        border.color: borderColor
+                        radius: 4
                     }
                 }
             }
@@ -1042,29 +1384,34 @@ Item {
                 spacing: 4
                 
                 Text {
-                    text: "备注"
+                    text: "备注 (可选)"
                     color: textColor
+                    font.pixelSize: 12
                 }
                 
-                Rectangle {
+                TextArea {
+                    id: editNoteInput
                     Layout.fillWidth: true
                     height: 72
-                    border.width: 1
-                    border.color: borderColor
-                    radius: 4
+                    text: editTransactionDialog.transactionNote
+                    wrapMode: TextArea.Wrap
+                    placeholderText: "输入备注信息..."
+                    selectByMouse: true
                     
-                    TextArea {
-                        id: editNoteInput
-                        anchors.fill: parent
-                        anchors.margins: 8
-                        color: textColor
-                        text: editTransactionDialog.transactionNote
-                        wrapMode: TextArea.Wrap
+                    background: Rectangle {
+                        color: "white"
+                        border.width: 1
+                        border.color: borderColor
+                        radius: 4
                     }
                 }
             }
         }
         
+        // Save and Cancel buttons styling (using standard buttons for now)
+        // If further customization is needed, we can replace standardButtons
+        // with custom styled Rectangles and MouseAreas similar to Filter/Reset buttons.
+
         // 保存编辑
         onAccepted: {
             try {
@@ -1094,6 +1441,7 @@ Item {
         title: "确认删除"
         modal: true
         standardButtons: Dialog.Yes | Dialog.No
+        width: Math.min(mainWindow.width * 0.5, 400)
         
         property int transactionId: 0
         property string transactionName: ""
@@ -1112,11 +1460,18 @@ Item {
             }
         }
         
-        Text {
-            width: 400
-            text: "确定要删除 '" + deleteConfirmDialog.transactionName + "' 这条交易记录吗？此操作不可撤销。"
-            wrapMode: Text.Wrap
-            color: textColor
+        ColumnLayout {
+            width: parent.width - 32
+            anchors.horizontalCenter: parent.horizontalCenter
+            spacing: 20
+            
+            Text {
+                Layout.fillWidth: true
+                text: "确定要删除 '" + deleteConfirmDialog.transactionName + "' 这条交易记录吗？此操作不可撤销。"
+                wrapMode: Text.Wrap
+                color: textColor
+                font.pixelSize: 14
+            }
         }
         
         onAccepted: {

@@ -11,6 +11,9 @@ from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtCore import QObject, QUrl, Signal, Slot, Property, QtMsgType, qInstallMessageHandler, Property
 
+# 加载资源文件
+from PySide6.QtCore import QResource
+
 # 尝试导入Qt Charts模块
 try:
     from PySide6 import QtCharts
@@ -28,6 +31,15 @@ try:
 except ImportError:
     has_effects = False
     
+# 尝试导入WebView模块
+try:
+    from PySide6 import QtWebView
+    QtWebView.initialize()
+    has_webview = True
+    logging.info("Qt WebView 模块加载成功")
+except ImportError:
+    has_webview = False
+    logging.warning("无法加载 Qt WebView 模块，图表功能将被禁用")
 
 # 版本信息
 __version__ = "0.1.0"
@@ -142,6 +154,7 @@ class MainApplication(QObject):
         context.setContextProperty("appVersion", __version__)
         context.setContextProperty("hasCharts", has_charts)  # 向QML传递Charts模块可用状态
         context.setContextProperty("hasEffects", has_effects)  # 向QML传递QtQuickEffects模块可用状态
+        context.setContextProperty("hasWebView", has_webview)  # 向QML传递WebView模块可用状态
         context.setContextProperty("themeManager", self.theme_manager) # 设置themeManager上下文属性
         
         # 注册QtCharts模块到QML引擎
@@ -151,7 +164,15 @@ class MainApplication(QObject):
         # 注册QtQuickEffects模块到QML引擎
         if has_effects:
             print("QtQuickEffects 模块已注册到QML引擎")
-        print("QML上下文设置完成")
+        
+        # 注册WebView模块到QML引擎
+        if has_webview:
+            print("Qt WebView 模块已注册到QML引擎")
+        
+        # 加载资源文件
+        resource_file = os.path.join(os.path.dirname(__file__), "ui", "resources.qrc")
+        QResource.registerResource(resource_file)
+        print(f"已注册资源文件: {resource_file}")
         
         # 设置导入路径，确保QML可以找到组件
         ui_dir = os.path.join(os.path.dirname(__file__), "ui")

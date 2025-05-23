@@ -2,13 +2,14 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Window
-import QtCharts
 import Qt5Compat.GraphicalEffects
 // Import custom components from the "components" directory
 import "components"
 // Import dialogs from the current directory, though we're defining them here directly for clarity
 // import "." as UI // Not strictly needed as dialogs are defined in this file
 
+// Import QtCharts conditionally
+import QtQuick.Layouts 2.15 // Make sure we have a stable version of layouts
 
 ApplicationWindow {
     id: mainWindow
@@ -26,6 +27,9 @@ ApplicationWindow {
         target: mainWindow
     }
     
+    // Qt Charts支持
+    property bool chartsAvailable: true  // 默认设置为可用，因为现在使用的是Plotly
+    
     // 使用低级别的渲染和动画处理，提高性能
     Component.onCompleted: {
         if (typeof mainWindow.renderingStats !== "undefined") {
@@ -34,6 +38,9 @@ ApplicationWindow {
         
         // 加载主题设置
         themeManagerInstance.loadTheme();
+        
+        // 确认图表支持
+        console.log("应用已启用Plotly图表支持");
     }
     
     // 优化窗口更新逻辑，减少拖动时的重绘
@@ -53,9 +60,8 @@ ApplicationWindow {
     property string currentUser: ""
     property int currentPage: 0  // 0: Dashboard, 1: Transactions, 2: Charts, 3: Import/Export, 4: Settings
     property bool isLoading: false // 控制加载动画显示
-
-    // Check if QtCharts module was successfully imported
-    property bool chartsAvailable: typeof Charts !== 'undefined'
+    property bool chartLoadRequested: false // 跟踪图表加载状态
+    property string chartLoadError: "" // 存储图表加载错误
 
     // Theme manager instance
     ThemeManager {
@@ -154,6 +160,26 @@ ApplicationWindow {
     function loadDashboard() {
         currentPage = 0;
         // Additional dashboard specific loading logic can go here
+    }
+
+    // Track page changes
+    property int previousPage: 0
+    onCurrentPageChanged: {
+        // 清理图表逻辑，当离开图表页时重置状态
+        if (previousPage === 2 && currentPage !== 2) {
+            // 不完全重置chartLoadRequested，这样可以保留用户之前的加载操作
+            // 但我们可以添加一些清理逻辑，如果需要的话
+            if (chartViewLoader && chartViewLoader.item) {
+                try {
+                    // 让图表视图知道它已不再可见
+                    chartViewLoader.item.visible = false;
+                } catch (e) {
+                    console.log("切换页面时重置图表状态出错:", e);
+                }
+            }
+        }
+        
+        previousPage = currentPage;
     }
 
     // --- User Selection View ---
@@ -863,7 +889,18 @@ ApplicationWindow {
                         text: qsTr("统计图表")
                         iconName: "chart"
                         selected: currentPage === 2
-                        onClicked: currentPage = 2
+                        onClicked: {
+                            currentPage = 2;
+                            // 简化图表加载逻辑
+                            if (chartViewLoader && chartViewLoader.status === Loader.Ready && chartViewLoader.item) {
+                                try {
+                                    console.log("NavButton: 触发图表数据加载");
+                                    chartViewLoader.item.startLoading();
+                                } catch (e) {
+                                    console.error("NavButton: 调用图表加载时出错:", e);
+                                }
+                            }
+                        }
                     }
 
                     NavButton {
@@ -939,19 +976,25 @@ ApplicationWindow {
 
                     // Chart Statistics View
                     Item {
-                        // Loader to conditionally load ChartView.qml
+                        id: chartViewContainer
+                        width: parent.width
+                        height: parent.height
+                        
+                        // 简单直接地加载ChartView组件
                         Loader {
+                            id: chartViewLoader
                             anchors.fill: parent
-                            // Load ChartView only if QtCharts module is available
-                            source: chartsAvailable ? "components/ChartView.qml" : ""
-
-                            // Message displayed if QtCharts is not available
-                            Text {
-                                anchors.centerIn: parent
-                                text: chartsAvailable ? "" : qsTr("图表功能需要Qt Charts模块支持")
-                                font.pixelSize: 18
-                                color: "gray"
-                                visible: !chartsAvailable
+                            source: "components/ChartView.qml"
+                            asynchronous: true // 异步加载减轻UI阻塞
+                            
+                            onLoaded: {
+                                console.log("ChartView.qml已成功加载");
+                            }
+                            
+                            onStatusChanged: {
+                                if (status === Loader.Error) {
+                                    console.error("加载ChartView.qml失败");
+                                }
                             }
                         }
                     }
@@ -1123,6 +1166,26 @@ ApplicationWindow {
         function onUpdateAvailable(version, notes) {
             updateDialog.open(); // Opens the update dialog when a new version is detected
             // 'version' and 'notes' parameters are available if you want to display them in the dialog.
+        }
+    }
+
+    // 图表数据加载函数 - 简化版
+    function loadChartData() {
+        // 确保图表页面是当前显示的
+        if (currentPage !== 2) {
+            currentPage = 2;
+        }
+        
+        // 简单尝试调用加载
+        if (chartViewLoader && chartViewLoader.status === Loader.Ready && chartViewLoader.item) {
+            try {
+                console.log("main.qml: 调用图表加载");
+                chartViewLoader.item.startLoading();
+            } catch (e) {
+                console.error("main.qml: 调用图表加载方法时出错:", e);
+            }
+        } else {
+            console.log("main.qml: 图表加载器尚未就绪");
         }
     }
 }

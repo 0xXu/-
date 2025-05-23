@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Dialogs
-
+import Qt5Compat.GraphicalEffects
 Item {
     id: settingsView
 
@@ -38,13 +38,14 @@ Item {
         property string text: "按钮"
         property bool highlighted: false
         property bool isPressed: false
+        property color bgColor: buttonBgColor // Default to theme's accent color or a fallback
         signal clicked()
 
         width: buttonWidth
         height: buttonHeight
         radius: buttonRadius
-        color: highlighted ? buttonBgColor : (theme ? (theme.isDarkTheme ? "#34495e" : "#e0e0e0") : "#e0e0e0")
-        border.color: highlighted ? buttonBorderColor : inputBorderColor
+        color: highlighted ? bgColor : (isPressed ? Qt.darker(bgColor, 1.1) : (theme ? (theme.isDarkTheme ? "#34495e" : "#e0e0e0") : "#e0e0e0")) // Use bgColor here
+        border.color: highlighted ? Qt.darker(bgColor, 1.1) : inputBorderColor // Use bgColor for highlighted border
         border.width: 1
 
         Text {
@@ -58,7 +59,7 @@ Item {
         MouseArea {
             anchors.fill: parent
             hoverEnabled: true
-            onEntered: parent.opacity = 0.8
+            onEntered: parent.opacity = highlighted ? 1.0 : 0.8 // Keep highlighted buttons fully opaque
             onExited: parent.opacity = 1.0
             onPressed: parent.isPressed = true
             onReleased: parent.isPressed = false
@@ -71,7 +72,7 @@ Item {
                 when: isPressed
                 PropertyChanges {
                     target: customBtn
-                    color: highlighted ? Qt.darker(buttonBgColor, 1.2) : Qt.darker(color, 1.1)
+                    // Color change is handled in the main color property binding now
                 }
             }
         ]
@@ -89,6 +90,7 @@ Item {
         property var currentValue: model && model.length > 0 && valueRole && currentIndex >= 0 ? 
                                  model[currentIndex][valueRole] : currentIndex
         signal indexChanged()
+        signal activated(int index) // 添加activated信号
 
         width: buttonWidth * 1.2
         height: inputHeight
@@ -167,6 +169,7 @@ Item {
                         onClicked: {
                             customCombo.currentIndex = index
                             customCombo.indexChanged()
+                            customCombo.activated(index) // 触发activated信号
                             dropdownMenu.close()
                         }
                     }
@@ -380,210 +383,409 @@ Item {
         }
     }
 
-    ScrollView {
-        anchors.fill: parent
-        clip: true
-        opacity: 0.0
+    // Behavior on opacity for the main view (moved from ScrollView)
         Behavior on opacity {
             NumberAnimation { duration: 400; easing.type: Easing.InOutQuad }
         }
-        Component.onCompleted: opacity = 1.0;
+    Component.onCompleted: settingsView.opacity = 1.0; // settingsView is the root Item, assuming opacity is on it or Flickable
+
+    Flickable {
+        id: flickableArea
+        anchors.fill: parent
+        clip: true
+        // Assuming settingsView is the root Item and flickableArea should have an initial opacity of 0 too
+        // and then fade in. If settingsView itself has the opacity, this is not needed here.
+        // opacity: 0.0 
+
+        contentWidth: settingsColumnLayout.width
+        contentHeight: settingsColumnLayout.implicitHeight
+        flickableDirection: Flickable.VerticalFlick
+        boundsBehavior: Flickable.StopAtBounds // Or Flickable.DragOverBounds for overscroll
+
+        // The main content layout
         ColumnLayout {
-            width: settingsView.width - 30
+            id: settingsColumnLayout
+            width: flickableArea.width - (customScrollbar.visible ? customScrollbar.width + customScrollbar.anchors.rightMargin : 0) - 30 // Adjust width for scrollbar and padding
             spacing: 20
 
-            // 设置标题 (移除保存按钮)
+            // Prevent layout loops by only binding width if flickableArea.width changes significantly
+            // This might not be strictly necessary but can help in complex layouts.
+            // onWidthChanged: { if (Math.abs(width - (flickableArea.width - ...)) > 1) updateLayout(); }
+            // function updateLayout() { width = ... } 
+
+            // Setting page title bar (Example of one card, others follow the same pattern)
             Rectangle {
+                id: titleCard // Ensure IDs are unique if they were based on ScrollView
                 Layout.fillWidth: true
-                height: 50
+                implicitHeight: titleLayout.implicitHeight + 30
                 color: cardColor
-                radius: 5
-                opacity: 0.0
-                SequentialAnimation on opacity {
-                    NumberAnimation { to: 1.0; duration: 400; easing.type: Easing.OutQuad }
+                radius: 10
+                
+                layer.enabled: true
+                layer.effect: DropShadow {
+                    horizontalOffset: 0
+                    verticalOffset: 2
+                    radius: 8.0
+                    samples: 17
+                    color: Qt.rgba(0, 0, 0, 0.15)
                 }
-                Component.onCompleted: opacity = 1.0;
+                
                 RowLayout {
+                    id: titleLayout
                     anchors.fill: parent
                     anchors.margins: 15
+                    spacing: 10
+
+                    // 标题和图标
+                    RowLayout {
+                        spacing: 12
+                        
+                        // 设置图标
+                        Rectangle {
+                            width: 36
+                            height: 36
+                            radius: width/2
+                            color: theme ? theme.primaryColor : "#3498db"
+                            
+                            Text {
+                                anchors.centerIn: parent
+                                text: "⚙️"
+                                font.pixelSize: 18
+                            }
+                        }
+                        
+                        // 标题文字
+                        Column {
+                            spacing: 4
 
                     Text {
                         text: "应用设置"
                         font.pixelSize: 18
                         font.bold: true
+                                color: theme ? theme.textColor : "black"
+                            }
+                            
+                            Text {
+                                text: "自定义应用外观和功能行为"
+                                font.pixelSize: 12
+                                color: Qt.darker(textColor, 1.2)
+                                opacity: 0.7
+                            }
+                        }
                     }
 
                     Item { Layout.fillWidth: true }
 
-                    // 保存设置按钮已移除
+                    // 保存设置按钮
+                    CustomButton {
+                        text: "保存设置"
+                        highlighted: true
+                        onClicked: saveSettings()
+                    }
                     }
                 }
             
             // 外观设置
             Rectangle {
+                id: appearanceCard
                 Layout.fillWidth: true
-                height: 260
+                implicitHeight: appearanceLayout.implicitHeight + 30
                 color: cardColor
-                radius: 5
-                y: 40
-                SequentialAnimation on y {
-                    NumberAnimation { to: 0; duration: 400; easing.type: Easing.OutQuad }
+                radius: 10
+                
+                layer.enabled: true
+                layer.effect: DropShadow {
+                    horizontalOffset: 0
+                    verticalOffset: 2
+                    radius: 8.0
+                    samples: 17
+                    color: Qt.rgba(0, 0, 0, 0.15)
                 }
-                Component.onCompleted: y = 0;
+                
                 ColumnLayout {
+                    id: appearanceLayout
                     anchors.fill: parent
                     anchors.margins: 15
+                    spacing: 16
+                    
+                    // 卡片标题
+                    RowLayout {
+                        Layout.fillWidth: true
                     spacing: 10
+                        
                     Text {
                         text: "外观设置"
                         font.pixelSize: 16
                         font.bold: true
+                            color: theme ? theme.textColor : "black"
+                        }
+                        
+                        Rectangle {
+                            Layout.fillWidth: true
+                            height: 1
+                            color: theme ? Qt.alpha(theme.borderColor, 0.5) : "#e0e0e0"
+                        }
                     }
+                    
+                    // 卡片内容
                     GridLayout {
                         Layout.fillWidth: true
                         columns: 2
-                        rowSpacing: 15
-                        columnSpacing: 20
+                        rowSpacing: 18
+                        columnSpacing: 24
+                        
                         // 盈利颜色
                         Text {
                             text: "盈利颜色:"
                             font.pixelSize: labelFontSize
-                            verticalAlignment: Text.AlignVCenter
+                            color: theme ? theme.textColor : "black"
+                            Layout.alignment: Qt.AlignVCenter
                         }
                         RowLayout {
-                            spacing: 10
-                            Layout.alignment: Qt.AlignLeft
+                            spacing: 12
+                            Layout.alignment: Qt.AlignLeft | Qt.AlignVCenter
+                            
+                            // 颜色预览块
                             Rectangle {
-                                width: 30
-                                height: 30
+                                width: 36
+                                height: 24
+                                radius: 4
                                 color: selectedProfitColor
-                                border.color: "black"
+                                border.color: theme ? Qt.alpha(theme.borderColor, 0.7) : "#d0d0d0"
                                 border.width: 1
+                                
+                                // 颜色名称或数值
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: selectedProfitColor.toString().toUpperCase()
+                                    font.pixelSize: 9
+                                    color: Qt.rgba(
+                                        1.0 - selectedProfitColor.r,
+                                        1.0 - selectedProfitColor.g,
+                                        1.0 - selectedProfitColor.b,
+                                        1.0
+                                    )
+                                    visible: false // 设置为true可以显示颜色代码
+                                }
                             }
+                            
                             CustomButton {
                                 text: "选择颜色"
                                 onClicked: {
                                     colorDialogProfit.open();
                                 }
                             }
+                            
                             CustomButton {
                                 text: "恢复默认"
                                 onClicked: {
-                                    selectedProfitColor = "#e74c3c";
+                                    selectedProfitColor = "#4CAF50";
                                     profitColor = selectedProfitColor; // 即时应用
                                 }
                             }
                         }
+                        
                         // 亏损颜色
                         Text {
                             text: "亏损颜色:"
                             font.pixelSize: labelFontSize
-                            verticalAlignment: Text.AlignVCenter
+                            color: theme ? theme.textColor : "black"
+                            Layout.alignment: Qt.AlignVCenter
                         }
                         RowLayout {
-                            spacing: 10
-                            Layout.alignment: Qt.AlignLeft
+                            spacing: 12
+                            Layout.alignment: Qt.AlignLeft | Qt.AlignVCenter
+                            
+                            // 颜色预览块
                             Rectangle {
-                                width: 30
-                                height: 30
+                                width: 36
+                                height: 24
+                                radius: 4
                                 color: selectedLossColor
-                                border.color: "black"
+                                border.color: theme ? Qt.alpha(theme.borderColor, 0.7) : "#d0d0d0"
                                 border.width: 1
+                                
+                                // 颜色名称或数值
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: selectedLossColor.toString().toUpperCase()
+                                    font.pixelSize: 9
+                                    color: Qt.rgba(
+                                        1.0 - selectedLossColor.r,
+                                        1.0 - selectedLossColor.g,
+                                        1.0 - selectedLossColor.b,
+                                        1.0
+                                    )
+                                    visible: false // 设置为true可以显示颜色代码
+                                }
                             }
+                            
                             CustomButton {
                                 text: "选择颜色"
                                 onClicked: {
                                     colorDialogLoss.open();
                                 }
                             }
+                            
                             CustomButton {
                                 text: "恢复默认"
                                 onClicked: {
-                                    selectedLossColor = "#2ecc71";
+                                    selectedLossColor = "#F44336";
                                     lossColor = selectedLossColor; // 即时应用
                                 }
                             }
                         }
+                        
                         // 主题风格
                         Text {
                             text: "主题风格:"
                             font.pixelSize: labelFontSize
-                            verticalAlignment: Text.AlignVCenter
+                            color: theme ? theme.textColor : "black"
+                            Layout.alignment: Qt.AlignVCenter
                         }
+                        
+                        ColumnLayout {
+                            spacing: 8
+                            
                         RowLayout {
-                            Layout.alignment: Qt.AlignLeft
-                            spacing: 10
-                            CustomComboBox {
-                            id: themeCombo
-                            model: ["light", "dark", "system"]
-                                currentIndex: model.indexOf(theme.currentTheme)
-                                onIndexChanged: {
-                                    theme.saveTheme(currentText);
+                                Layout.alignment: Qt.AlignLeft | Qt.AlignVCenter
+                                spacing: 12
+                                
+                                Row {
+                                    spacing: 4
+                                    
+                                    // 主题选择按钮组
+                                    Repeater {
+                                        model: [
+                                            { name: "亮色", value: "light", icon: "☀️" },
+                                            { name: "暗色", value: "dark", icon: "🌙" },
+                                            { name: "系统", value: "system", icon: "🖥️" }
+                                        ]
+                                        
+                                        Rectangle {
+                                            width: 70
+                                            height: 32
+                                            radius: 6
+                                            color: theme.currentTheme === modelData.value ? 
+                                                theme.accentColor : 
+                                                theme ? (theme.isDarkTheme ? "#2c3e50" : "#f5f5f5") : "#f5f5f5"
+                                            border.color: theme.currentTheme === modelData.value ? 
+                                                theme.accentColor : 
+                                                theme ? (theme.isDarkTheme ? "#34495e" : "#e0e0e0") : "#e0e0e0"
+                                            border.width: 1
+                                            
+                                            Row {
+                                                anchors.centerIn: parent
+                                                spacing: 4
+                                                
+                                                Text {
+                                                    text: modelData.icon
+                                                    font.pixelSize: 14
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                }
+                                                
+                                                Text {
+                                                    text: modelData.name
+                                                    font.pixelSize: 13
+                                                    color: theme.currentTheme === modelData.value ? 
+                                                        "white" : 
+                                                        theme ? theme.textColor : "black"
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                }
+                                            }
+                                            
+                                            MouseArea {
+                                                anchors.fill: parent
+                                onClicked: {
+                                                    theme.saveTheme(modelData.value);
+                                                }
+                                                cursorShape: Qt.PointingHandCursor
+                                            }
+                                        }
+                                    }
                                 }
                             }
                             
-                            CustomButton {
-                                text: theme.isDarkTheme ? "切换到亮色" : "切换到暗色"
-                                onClicked: {
-                                    theme.saveTheme(theme.isDarkTheme ? "light" : "dark");
-                                }
+                            Text {
+                                text: theme.isDarkTheme ? 
+                                    "暗色主题适合夜间使用，减轻眼睛疲劳" : 
+                                    "亮色主题适合日间使用，提高可读性"
+                                font.pixelSize: 11
+                                color: Qt.darker(textColor, 1.2)
+                                opacity: 0.7
+                                Layout.fillWidth: true
+                                wrapMode: Text.WordWrap
                             }
                         }
+                        
                         // 主色调
                         Text {
                             text: "主色调:"
                             font.pixelSize: labelFontSize
-                            verticalAlignment: Text.AlignVCenter
+                            color: theme ? theme.textColor : "black"
+                            Layout.alignment: Qt.AlignVCenter
                         }
                         RowLayout {
-                            spacing: 10
-                            Layout.alignment: Qt.AlignLeft
+                            spacing: 12
+                            Layout.alignment: Qt.AlignLeft | Qt.AlignVCenter
+                            
+                            // 颜色预览块
                             Rectangle {
-                                width: 30
-                                height: 30
+                                width: 36
+                                height: 24
+                                radius: 4
                                 color: theme.primaryColor
-                                border.color: "black"
+                                border.color: theme ? Qt.alpha(theme.borderColor, 0.7) : "#d0d0d0"
                                 border.width: 1
                             }
+                            
                             CustomButton {
                                 text: "选择颜色"
                                 onClicked: {
                                     colorDialogPrimary.open();
                                 }
                             }
+                            
                             CustomButton {
                                 text: "恢复默认"
                                 onClicked: {
-                                    theme.setColor("primaryColor", "#2c3e50");
+                                    theme.setColor("primaryColor", "#4CAF50");
                                 }
                             }
                         }
+                        
                         // 强调色
                         Text {
                             text: "强调色:"
                             font.pixelSize: labelFontSize
-                            verticalAlignment: Text.AlignVCenter
+                            color: theme ? theme.textColor : "black"
+                            Layout.alignment: Qt.AlignVCenter
                         }
                         RowLayout {
-                            spacing: 10
-                            Layout.alignment: Qt.AlignLeft
+                            spacing: 12
+                            Layout.alignment: Qt.AlignLeft | Qt.AlignVCenter
+                            
+                            // 颜色预览块
                             Rectangle {
-                                width: 30
-                                height: 30
+                                width: 36
+                                height: 24
+                                radius: 4
                                 color: theme.accentColor
-                                border.color: "black"
+                                border.color: theme ? Qt.alpha(theme.borderColor, 0.7) : "#d0d0d0"
                                 border.width: 1
                             }
+                            
                             CustomButton {
                                 text: "选择颜色"
                                 onClicked: {
                                     colorDialogAccent.open();
                                 }
                             }
+                            
                             CustomButton {
                                 text: "恢复默认"
                                 onClicked: {
-                                    theme.setColor("accentColor", "#3498db");
+                                    theme.setColor("accentColor", "#2196F3");
                                 }
                             }
                         }
@@ -593,97 +795,345 @@ Item {
 
             // 备份设置
             Rectangle {
+                id: backupCard
                 Layout.fillWidth: true
-                // height: 180  // 移除固定高度
-                implicitHeight: backupSettingsLayout.implicitHeight + 30 // 根据内容自动调整高度
+                implicitHeight: backupSettingsLayout.implicitHeight + 30
                 color: cardColor
-                radius: 5
+                radius: 10
+                
+                layer.enabled: true
+                layer.effect: DropShadow {
+                    horizontalOffset: 0
+                    verticalOffset: 2
+                    radius: 8.0
+                    samples: 17
+                    color: Qt.rgba(0, 0, 0, 0.15)
+                }
 
                 ColumnLayout {
                     id: backupSettingsLayout
                     anchors.fill: parent
                     anchors.margins: 15
+                    spacing: 16
+
+                    // 卡片标题
+                    RowLayout {
+                        Layout.fillWidth: true
                     spacing: 10
 
                     Text {
-                        text: "备份设置"
+                            text: "备份与恢复"
                         font.pixelSize: 16
                         font.bold: true
+                            color: theme ? theme.textColor : "black"
+                        }
+                        
+                        Rectangle {
+                            Layout.fillWidth: true
+                            height: 1
+                            color: theme ? Qt.alpha(theme.borderColor, 0.5) : "#e0e0e0"
+                        }
+                    }
+                    
+                    // 说明文本
+                    Text {
+                        text: "定期备份可以防止数据丢失，您可以随时恢复历史备份"
+                        font.pixelSize: 12
+                        color: Qt.darker(textColor, 1.2)
+                        opacity: 0.8
+                        Layout.fillWidth: true
+                        wrapMode: Text.WordWrap
                     }
 
+                    // 备份内容设置
                     GridLayout {
                         Layout.fillWidth: true
                         columns: 2
-                        rowSpacing: 15
-                        columnSpacing: 20
+                        rowSpacing: 18
+                        columnSpacing: 24
 
                         Text {
                             text: "保留备份天数:"
                             font.pixelSize: labelFontSize
-                            verticalAlignment: Text.AlignVCenter
+                            color: theme ? theme.textColor : "black"
+                            Layout.alignment: Qt.AlignVCenter
                         }
+
+                        RowLayout {
+                            spacing: 12
+                            Layout.alignment: Qt.AlignLeft | Qt.AlignVCenter
 
                         CustomSpinBox {
                             id: backupDaysSpinBox
                             from: 1
-                            to: 30
+                                to: 90
                             value: settingsView.backupDays
 
                             onSpinValueChanged: {
                                 settingsView.backupDays = value;
-                                backend.cleanupBackups(value);
+                                }
+                            }
+                            
+                            Text {
+                                text: "天"
+                                font.pixelSize: labelFontSize
+                                color: theme ? theme.textColor : "black"
+                            }
+                        }
+                        
+                        Text {
+                            text: "自动备份频率:"
+                            font.pixelSize: labelFontSize
+                            color: theme ? theme.textColor : "black"
+                            Layout.alignment: Qt.AlignVCenter
+                        }
+                        
+                        RowLayout {
+                            spacing: 12
+                            
+                            CustomComboBox {
+                                id: backupIntervalCombo
+                                model: [
+                                    { text: "每次退出", value: "exit" },
+                                    { text: "每天", value: "daily" }, 
+                                    { text: "每周", value: "weekly" },
+                                    { text: "从不", value: "never" }
+                                ]
+                                textRole: "text"
+                                valueRole: "value"
+                                currentIndex: 1 // 默认为每天
+                                
+                                onIndexChanged: {
+                                    // 保存自动备份频率设置
+                                    if(backend) {
+                                        backend.setBackupInterval(currentValue);
+                                    }
+                                }
+                            }
+                            
+                            Rectangle { // WarningRect
+                                color: "#FFF9C4" // 浅黄色背景
+                                radius: 4
+                                height: 28
+                                // width: childrenRect.width + 16 // OLD
+                                implicitWidth: warningRow.implicitWidth + 16 // NEW
+                                visible: backupIntervalCombo.currentValue === "never"
+                                
+                                Row {
+                                    id: warningRow // Assign an ID to the Row
+                                    anchors.centerIn: parent
+                                    spacing: 6
+                                    
+                                    Text {
+                                        text: "⚠️"
+                                        font.pixelSize: 14
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
+                                    
+                                    Text {
+                                        text: "不推荐"
+                                        font.pixelSize: 12
+                                        color: "#FF6F00" // 深橙色
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
+                                }
                             }
                         }
                     }
 
+                    // 备份操作按钮
                     RowLayout {
                         Layout.topMargin: 10
                         Layout.fillWidth: true
+                        spacing: 16
 
-                        CustomButton {
-                            text: "立即备份数据库"
+                        // 立即备份按钮
+                        Rectangle {
+                            Layout.preferredWidth: 140
+                            height: 36
+                            radius: 4
+                            color: theme.accentColor
+                            
+                            Row {
+                                anchors.centerIn: parent
+                                spacing: 8
+                                
+                                Text {
+                                    text: "💾"
+                                    font.pixelSize: 16
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                                
+                                Text {
+                                    text: "立即备份"
+                                    color: "white"
+                                    font.bold: true
+                                    font.pixelSize: 14
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                            }
+                            
+                            MouseArea {
+                                anchors.fill: parent
                             onClicked: backupDatabase()
+                                cursorShape: Qt.PointingHandCursor
+                                hoverEnabled: true
+                                onEntered: parent.opacity = 0.9
+                                onExited: parent.opacity = 1.0
+                            }
                         }
+                        
+                        // 恢复备份按钮
+                        Rectangle {
+                            Layout.preferredWidth: 140
+                            height: 36
+                            radius: 4
+                            color: "transparent"
+                            border.color: theme.accentColor
+                            border.width: 1
+                            
+                            Row {
+                                anchors.centerIn: parent
+                                spacing: 8
 
                         Text {
-                            text: "备份将保存在用户数据目录中"
+                                    text: "🔄"
+                                    font.pixelSize: 16
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                                
+                                Text {
+                                    text: "恢复备份"
+                                    color: theme.accentColor
+                                    font.bold: true
+                                    font.pixelSize: 14
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                            }
+                            
+                            MouseArea {
+                                anchors.fill: parent
+                                onClicked: restoreBackupDialog.open()
+                                cursorShape: Qt.PointingHandCursor
+                                hoverEnabled: true
+                                onEntered: parent.opacity = 0.9
+                                onExited: parent.opacity = 1.0
+                            }
+                        }
+                        
+                        // 查看备份按钮
+                        Rectangle {
+                            Layout.preferredWidth: 140
+                            height: 36
+                            radius: 4
+                            color: "transparent"
+                            border.color: inputBorderColor
+                            border.width: 1
+                            
+                            Row {
+                                anchors.centerIn: parent
+                                spacing: 8
+                                
+                                Text {
+                                    text: "📂"
+                                    font.pixelSize: 16
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                                
+                                Text {
+                                    text: "查看备份文件"
+                                    color: theme ? theme.textColor : "black"
+                                    font.pixelSize: 14
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                            }
+                            
+                            MouseArea {
+                                anchors.fill: parent
+                                onClicked: {
+                                    backend.openBackupFolder();
+                                }
+                                cursorShape: Qt.PointingHandCursor
+                                hoverEnabled: true
+                                onEntered: parent.opacity = 0.8
+                                onExited: parent.opacity = 1.0
+                            }
+                        }
+                    }
+                    
+                    // 备份信息提示
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: backupInfoText.implicitHeight + 16
+                        color: theme.isDarkTheme ? Qt.rgba(0.2, 0.3, 0.4, 0.3) : Qt.rgba(0.9, 0.95, 1.0, 0.5)
+                        radius: 4
+                        border.width: 1
+                        border.color: theme.isDarkTheme ? Qt.rgba(0.3, 0.4, 0.5, 0.3) : Qt.rgba(0.8, 0.85, 0.9, 0.5)
+                        
+                        Text {
+                            id: backupInfoText
+                            anchors.fill: parent
+                            anchors.margins: 8
+                            text: "备份文件保存在: " + (backend ? backend.getBackupPath() : "用户数据目录") + "\n" +
+                                  "当前系统上次备份时间: " + (backend ? backend.getLastBackupTime() : "未知")
                             font.pixelSize: 12
                             color: Qt.darker(textColor, 1.2)
-                            Layout.fillWidth: true
                             wrapMode: Text.WordWrap
-                            Layout.leftMargin: 10
-                            verticalAlignment: Text.AlignVCenter
                         }
                     }
                 }
             }
 
-            // 目标设置
+            // 分析设置
             Rectangle {
+                id: analysisCard // Renamed from potential conflict if old id was analysisSettingsLayout
                 Layout.fillWidth: true
-                implicitHeight: goalSettingsLayout.implicitHeight + 30 // 根据内容自动调整高度
+                implicitHeight: analysisSettingsLayout.implicitHeight + 30
                 color: cardColor
-                radius: 5
+                radius: 10
+                
+                layer.enabled: true
+                layer.effect: DropShadow {
+                    horizontalOffset: 0
+                    verticalOffset: 2
+                    radius: 8.0
+                    samples: 17
+                    color: Qt.rgba(0, 0, 0, 0.15)
+                }
 
                 ColumnLayout {
-                    id: goalSettingsLayout
+                    id: analysisSettingsLayout // This ID seems to be used for the content
                     anchors.fill: parent
                     anchors.margins: 15
-                    spacing: 15
+                    spacing: 16
+
+                    // 卡片标题
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 10
 
                     Text {
-                        text: "盈利目标设置"
+                            text: "分析设置"
                         font.pixelSize: 16
                         font.bold: true
+                            color: theme ? theme.textColor : "black"
+                        }
+                        
+                        Rectangle {
+                            Layout.fillWidth: true
+                            height: 1
+                            color: theme ? Qt.alpha(theme.borderColor, 0.5) : "#e0e0e0"
+                        }
                     }
                     
-                    // 描述文本
+                    // 说明文本
                     Text {
-                        text: "设置月度和年度盈利目标，系统将在仪表盘显示完成进度"
+                        text: "调整分析参数，生成更精准的统计和建议"
                         font.pixelSize: 12
                         color: Qt.darker(textColor, 1.2)
                         opacity: 0.8
                         Layout.fillWidth: true
+                        wrapMode: Text.WordWrap
                     }
                     
                     // 添加分隔线
@@ -696,10 +1146,299 @@ Item {
                         Layout.bottomMargin: 5
                     }
 
-                    // 月度目标设置卡片
+                    // 分析设置选项卡 - 使用更现代的设计
                     Rectangle {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: monthlyGoalContent.implicitHeight + 30
+                        implicitHeight: analysisContent.implicitHeight + 30
+                        color: theme ? (theme.isDarkTheme ? Qt.rgba(0.2, 0.2, 0.25, 0.3) : Qt.rgba(0.97, 0.97, 1.0, 0.7)) : "#f5f5f5"
+                        radius: 8
+                        border.width: 1
+                        border.color: theme ? (theme.isDarkTheme ? Qt.rgba(0.3, 0.3, 0.5, 0.5) : Qt.rgba(0.8, 0.8, 0.9, 1.0)) : "#d0d0d0"
+                        
+                        ColumnLayout {
+                            id: analysisContent
+                            anchors.fill: parent
+                            anchors.margins: 15
+                            spacing: 15
+                            
+                            // 统计区间设置
+                            GridLayout {
+                                Layout.fillWidth: true
+                                columns: 2
+                                rowSpacing: 15
+                                columnSpacing: 15
+                                
+                                // 统计区间
+                                Text {
+                                    text: "统计区间:"
+                                    font.pixelSize: labelFontSize
+                                    color: theme ? theme.textColor : "black"
+                                }
+                                
+                                CustomComboBox {
+                                    id: statisticsPeriodCombo
+                                    model: ["近7天", "近30天", "本月", "本季度", "本年", "全部"]
+                                    currentIndex: 2 // 默认选择"本月"
+                                    
+                                    onActivated: {
+                                        if (backend) {
+                                            backend.setStatisticsPeriod(currentIndex);
+                                        }
+                                    }
+                                }
+                                
+                                // 将收益计入统计
+                                Text {
+                                    text: "将股息计入统计:"
+                                    font.pixelSize: labelFontSize
+                                    color: theme ? theme.textColor : "black"
+                                }
+                                
+                                CustomCheckBox {
+                                    id: includeDividendCheck
+                                    text: ""
+                                    checked: true
+                                    
+                                    onCheckClicked: {
+                                        if (backend) {
+                                            backend.setIncludeDividend(checked);
+                                        }
+                                    }
+                                }
+                                
+                                // 将手续费计入统计
+                                        Text {
+                                    text: "将手续费计入统计:"
+                                    font.pixelSize: labelFontSize
+                                            color: theme ? theme.textColor : "black"
+                                }
+                                
+                                CustomCheckBox {
+                                    id: includeFeeCheck
+                                    text: ""
+                                    checked: true
+                                    
+                                    onCheckClicked: {
+                                        if (backend) {
+                                            backend.setIncludeFee(checked);
+                                        }
+                                    }
+                                }
+                                
+                                // 项目分组方式
+                                        Text {
+                                    text: "项目分组方式:"
+                                    font.pixelSize: labelFontSize
+                                            color: theme ? theme.textColor : "black"
+                                }
+                                
+                                CustomComboBox {
+                                    id: projectGroupingCombo
+                                    model: ["按项目", "按类别", "按平台"]
+                                    currentIndex: 0
+                                    
+                                    onActivated: {
+                                        if (backend) {
+                                            backend.setProjectGrouping(currentIndex);
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // 高级分析设置
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 10
+                                
+                                Text {
+                                    text: "高级分析选项"
+                                    font.pixelSize: 14
+                                    font.bold: true
+                                    color: theme ? theme.textColor : "black"
+                                }
+                                
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    height: 1
+                                    color: theme ? Qt.alpha(theme.borderColor, 0.3) : "#e0e0e0"
+                                }
+                                
+                                // 高级选项内容
+                                GridLayout {
+                                    Layout.fillWidth: true
+                                    columns: 2
+                                    rowSpacing: 15
+                                    columnSpacing: 15
+                                    
+                                    // 生成风险评估
+                                Text {
+                                        text: "生成风险评估:"
+                                    font.pixelSize: labelFontSize
+                                    color: theme ? theme.textColor : "black"
+                                }
+                                
+                                    CustomCheckBox {
+                                        id: riskAssessmentCheck
+                                        text: ""
+                                        checked: true
+                                        
+                                        onCheckClicked: {
+                                            if (backend) {
+                                                backend.setGenerateRiskAssessment(checked);
+                                            }
+                                        }
+                                    }
+                                    
+                                    // 生成投资建议
+                                        Text {
+                                        text: "生成投资建议:"
+                                        font.pixelSize: labelFontSize
+                                            color: theme ? theme.textColor : "black"
+                                    }
+                                    
+                                    CustomCheckBox {
+                                        id: investmentAdviceCheck
+                                        text: ""
+                                        checked: true
+                                        
+                                        onCheckClicked: {
+                                            if (backend) {
+                                                backend.setGenerateInvestmentAdvice(checked);
+                                            }
+                                        }
+                                    }
+                                    
+                                    // AI分析深度
+                                        Text {
+                                        text: "AI分析深度:"
+                                        font.pixelSize: labelFontSize
+                                            color: theme ? theme.textColor : "black"
+                                    }
+                                    
+                                    CustomComboBox {
+                                        id: aiAnalysisDepthCombo
+                                        model: ["简要", "标准", "详细"]
+                                        currentIndex: 1
+                                        
+                                        onActivated: {
+                                            if (backend) {
+                                                backend.setAiAnalysisDepth(currentIndex);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                            // 操作按钮
+                                RowLayout {
+                                Layout.fillWidth: true
+                                Layout.topMargin: 10
+                                    spacing: 10
+                                    
+                                Item { Layout.fillWidth: true }
+                                
+                                CustomButton {
+                                    text: "重置默认"
+                                    implicitWidth: 100
+                                    
+                                    onClicked: {
+                                        statisticsPeriodCombo.currentIndex = 2; // "本月"
+                                        includeDividendCheck.checked = true;
+                                        includeFeeCheck.checked = true;
+                                        projectGroupingCombo.currentIndex = 0;
+                                        riskAssessmentCheck.checked = true;
+                                        investmentAdviceCheck.checked = true;
+                                        aiAnalysisDepthCombo.currentIndex = 1;
+                                        
+                                        if (backend) {
+                                            backend.resetAnalysisSettings();
+                                        }
+                                    }
+                                }
+                                
+                                CustomButton {
+                                    text: "立即分析"
+                                    implicitWidth: 100
+                                    bgColor: theme ? theme.primaryColor : "#4CAF50"
+                                    
+                                    onClicked: {
+                                        if (backend) {
+                                            backend.runAnalysis();
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 目标设置
+            Rectangle {
+                id: goalCard 
+                Layout.fillWidth: true
+                implicitHeight: goalSettingsLayout.implicitHeight + 30
+                color: cardColor
+                radius: 10
+                
+                layer.enabled: true
+                layer.effect: DropShadow {
+                    horizontalOffset: 0
+                    verticalOffset: 2
+                    radius: 8.0
+                    samples: 17
+                    color: Qt.rgba(0, 0, 0, 0.15)
+                }
+
+                ColumnLayout {
+                    id: goalSettingsLayout
+                    anchors.fill: parent
+                    anchors.margins: 15
+                    spacing: 16
+
+                    // 卡片标题
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 10
+                        
+                        Text {
+                            text: "盈利目标设置"
+                            font.pixelSize: 16
+                            font.bold: true
+                            color: theme ? theme.textColor : "black"
+                        }
+                        
+                        Rectangle {
+                            Layout.fillWidth: true
+                            height: 1
+                            color: theme ? Qt.alpha(theme.borderColor, 0.5) : "#e0e0e0"
+                        }
+                    }
+                    
+                    // 说明文本
+                    Text {
+                        text: "设置月度和年度盈利目标，系统将在仪表盘显示完成进度"
+                        font.pixelSize: 12
+                        color: Qt.darker(textColor, 1.2)
+                        opacity: 0.8
+                        Layout.fillWidth: true
+                        wrapMode: Text.WordWrap
+                    }
+
+                    // 添加分隔线
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 1
+                        color: inputBorderColor
+                        opacity: 0.5
+                        Layout.topMargin: 5
+                        Layout.bottomMargin: 5
+                    }
+
+                    // 月度目标设置卡片 - 使用更现代的设计
+                    Rectangle {
+                        Layout.fillWidth: true
+                        implicitHeight: monthlyGoalContent.implicitHeight + 30
                         color: theme ? (theme.isDarkTheme ? Qt.rgba(0.2, 0.2, 0.25, 0.3) : Qt.rgba(0.97, 0.97, 1.0, 0.7)) : "#f5f5f5"
                         radius: 8
                         border.width: 1
@@ -716,6 +1455,20 @@ Item {
                                 Layout.fillWidth: true
                                 spacing: 10
                                 
+                                // 图标
+                                Rectangle {
+                                    width: 26
+                                    height: 26
+                                    radius: width/2
+                                    color: theme ? Qt.alpha(theme.primaryColor, 0.7) : "#4CAF50"
+                                
+                                Text {
+                                        anchors.centerIn: parent
+                                        text: "📅"
+                                        font.pixelSize: 14
+                                    }
+                                }
+                                
                                 Text {
                                     text: "月度目标"
                                     font.pixelSize: 15
@@ -728,339 +1481,205 @@ Item {
                                     height: 1
                                     color: theme ? (theme.isDarkTheme ? Qt.rgba(0.4, 0.4, 0.6, 0.5) : Qt.rgba(0.8, 0.8, 0.9, 0.8)) : "#d0d0d0"
                                 }
+                                
+                                // 开启/关闭切换
+                                Rectangle {
+                                    width: 50
+                                    height: 24
+                                    radius: height/2
+                                    color: monthlyGoalSwitch.checked ? theme.primaryColor : 
+                                           (theme.isDarkTheme ? "#2c3e50" : "#d0d0d0")
+                                    
+                                    Rectangle {
+                                        width: 16
+                                        height: 16
+                                        radius: width/2
+                                        color: "white"
+                                        x: monthlyGoalSwitch.checked ? parent.width - width - 4 : 4
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        
+                                        Behavior on x {
+                                            NumberAnimation { duration: 150 }
+                                        }
+                                    }
+                                    
+                                    MouseArea {
+                                        id: monthlyGoalSwitch
+                                        anchors.fill: parent
+                                        property bool checked: true
+                                        onClicked: {
+                                            checked = !checked;
+                                            // TODO: Connect to backend
+                                            if (backend) {
+                                                backend.enableMonthlyGoal(checked);
+                                            }
+                                        }
+                                    }
+                                }
                             }
                             
                             // 内容区
                             GridLayout {
                                 Layout.fillWidth: true
-                                columns: 3
+                                columns: 2
                                 rowSpacing: 15
                                 columnSpacing: 15
+                                enabled: monthlyGoalSwitch.checked
+                                opacity: monthlyGoalSwitch.checked ? 1.0 : 0.5
                                 
-                                // 金额
+                                Behavior on opacity {
+                                    NumberAnimation { duration: 150 }
+                                }
+                                
+                                // 月度目标金额
                                 Text {
-                                    text: "金额:"
+                                    text: "目标金额:"
                                     font.pixelSize: labelFontSize
                                     color: theme ? theme.textColor : "black"
                                 }
+                                
+                                RowLayout {
+                                    spacing: 10
                                 
                                 Rectangle {
                                     Layout.preferredWidth: 180
                                     Layout.minimumWidth: 120
                                     height: inputHeight
+                                        radius: inputRadius
                                     color: inputBgColor
                                     border.color: inputBorderColor
                                     border.width: 1
-                                    radius: inputRadius
                                     
                                     RowLayout {
                                         anchors.fill: parent
-                                        anchors.leftMargin: 5
-                                        anchors.rightMargin: 5
+                                            anchors.leftMargin: 8
+                                            anchors.rightMargin: 8
                                         spacing: 0
                                         
                                         Text {
-                                            text: "-"
-                                            font.pixelSize: 18
-                                            color: theme ? theme.textColor : "black"
-                                            Layout.preferredWidth: 25
-                                            horizontalAlignment: Text.AlignHCenter
-                                            
-                                            MouseArea {
-                                                anchors.fill: parent
-                                                onClicked: {
-                                                    var newValue = Math.max(0, monthlyAmountField.value - 1000);
-                                                    monthlyAmountField.text = newValue.toFixed(2);
-                                                    monthlyAmountField.value = newValue;
-                                                }
-                                            }
+                                                text: "¥"
+                                                color: inputTextColor
+                                                font.pixelSize: inputFontSize
                                         }
                                         
                                         TextInput {
-                                            id: monthlyAmountField
+                                                id: monthlyGoalInput
                                             Layout.fillWidth: true
-                                            property real value: 5000
-                                            text: value.toFixed(2)
-                                            font.pixelSize: inputFontSize
+                                                horizontalAlignment: TextInput.AlignRight
                                             color: inputTextColor
-                                            horizontalAlignment: Text.AlignHCenter
-                                            verticalAlignment: TextInput.AlignVCenter
-                                            validator: DoubleValidator { bottom: 0; notation: DoubleValidator.StandardNotation }
+                                                font.pixelSize: inputFontSize
                                             selectByMouse: true
-                                            
-                                            onTextChanged: {
-                                                if (text === "" || text === ".") return;
-                                                value = parseFloat(text);
-                                            }
-                                        }
-                                        
-                                        Text {
-                                            text: "+"
-                                            font.pixelSize: 18
-                                            color: theme ? theme.textColor : "black"
-                                            Layout.preferredWidth: 25
-                                            horizontalAlignment: Text.AlignHCenter
-                                            
-                                            MouseArea {
-                                                anchors.fill: parent
-                                                onClicked: {
-                                                    var newValue = monthlyAmountField.value + 1000;
-                                                    monthlyAmountField.text = newValue.toFixed(2);
-                                                    monthlyAmountField.value = newValue;
+                                                validator: DoubleValidator {
+                                                    bottom: 0.0
+                                                    notation: DoubleValidator.StandardNotation
+                                                    decimals: 2
+                                                }
+                                                text: "1000.00" // Default value - should connect to backend
+                                                
+                                                onEditingFinished: {
+                                                    if (backend) {
+                                                        backend.setMonthlyGoal(parseFloat(text) || 0);
+                                                    }
                                                 }
                                             }
                                         }
                                     }
+                                    
+                                    // 重置按钮
+                                    CustomButton {
+                                        text: "重置"
+                                        implicitWidth: 70
+                                                onClicked: {
+                                            if (backend) {
+                                                backend.resetMonthlyGoal();
+                                                monthlyGoalInput.text = "0.00";
+                                            }
+                                        }
+                                    }
                                 }
+                                
+                                // 当前进度
+                                Text {
+                                    text: "当前进度:"
+                                    font.pixelSize: labelFontSize
+                                    color: theme ? theme.textColor : "black"
+                                }
+                                
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 8
+                                    
+                                    // 进度文字
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 5
 
                                 Text {
-                                    text: "元"
-                                    font.pixelSize: labelFontSize - 2
-                                    color: Qt.darker(theme.textColor, 1.2)
-                                }
-                                
-                                // 月份
+                                            id: currentMonthProfitText
+                                            text: "¥" + ((backend ? backend.getCurrentMonthProfit() : 0) || 0).toFixed(2)
+                                            font.pixelSize: labelFontSize
+                                            font.bold: true
+                                            color: (currentMonthProfitText.text.indexOf("-") === -1) ? profitColor : lossColor
+                                        }
+                                        
                                 Text {
-                                    text: "月份:"
+                                            text: " / ¥" + monthlyGoalInput.text
                                     font.pixelSize: labelFontSize
                                     color: theme ? theme.textColor : "black"
                                 }
                                 
-                                ComboBox {
-                                    id: monthCombo
-                                    Layout.preferredWidth: 100
-                                    model: [
-                                        {text: "1月", value: 1}, {text: "2月", value: 2},
-                                        {text: "3月", value: 3}, {text: "4月", value: 4},
-                                        {text: "5月", value: 5}, {text: "6月", value: 6},
-                                        {text: "7月", value: 7}, {text: "8月", value: 8},
-                                        {text: "9月", value: 9}, {text: "10月", value: 10},
-                                        {text: "11月", value: 11}, {text: "12月", value: 12}
-                                    ]
-                                    textRole: "text"
-                                    valueRole: "value"
-                                    currentIndex: new Date().getMonth()
-                                    
-                                    property int selectedMonthValue: model[currentIndex].value
-                                }
-                                
-                                Item { width: 1 } // 占位
-                                
-                                // 年份
-                                Text {
-                                    text: "年份:"
-                                    font.pixelSize: labelFontSize
-                                    color: theme ? theme.textColor : "black"
-                                }
-                                
-                                Rectangle {
-                                    Layout.preferredWidth: 100
-                                    height: inputHeight
-                                    color: inputBgColor
-                                    border.color: inputBorderColor
-                                    border.width: 1
-                                    radius: inputRadius
-                                    
-                                    RowLayout {
-                                        anchors.fill: parent
-                                        anchors.leftMargin: 5
-                                        anchors.rightMargin: 5
-                                        spacing: 0
+                                        Item { Layout.fillWidth: true }
                                         
                                         Text {
-                                            text: "-"
-                                            font.pixelSize: 18
-                                            color: theme ? theme.textColor : "black"
-                                            Layout.preferredWidth: 25
-                                            horizontalAlignment: Text.AlignHCenter
-                                            
-                                            MouseArea {
-                                                anchors.fill: parent
-                                                onClicked: {
-                                                    var newValue = Math.max(2020, yearField.value - 1);
-                                                    yearField.text = newValue.toString();
-                                                    yearField.value = newValue;
-                                                }
-                                            }
-                                        }
-                                        
-                                        TextInput {
-                                            id: yearField
-                                            Layout.fillWidth: true
-                                            property int value: new Date().getFullYear()
-                                            text: value.toString()
-                                            font.pixelSize: inputFontSize
-                                            color: inputTextColor
-                                            horizontalAlignment: Text.AlignHCenter
-                                            verticalAlignment: TextInput.AlignVCenter
-                                            validator: IntValidator { bottom: 2020; top: 2100 }
-                                            selectByMouse: true
-                                            
-                                            onTextChanged: {
-                                                if (text === "") return;
-                                                var val = parseInt(text);
-                                                if (!isNaN(val)) value = val;
-                                            }
+                                            text: currentMonthProgressText.text + "%"
+                                            font.pixelSize: labelFontSize
+                                            font.bold: true
+                                            color: (currentMonthProfitText.text.indexOf("-") === -1) ? profitColor : lossColor
                                         }
                                         
                                         Text {
-                                            text: "+"
-                                            font.pixelSize: 18
-                                            color: theme ? theme.textColor : "black"
-                                            Layout.preferredWidth: 25
-                                            horizontalAlignment: Text.AlignHCenter
-                                            
-                                            MouseArea {
-                                                anchors.fill: parent
-                                                onClicked: {
-                                                    var newValue = Math.min(2100, yearField.value + 1);
-                                                    yearField.text = newValue.toString();
-                                                    yearField.value = newValue;
+                                            id: currentMonthProgressText
+                                            visible: false // 仅用于计算
+                                            text: {
+                                                try {
+                                                    const profit = parseFloat(currentMonthProfitText.text.replace("¥", ""));
+                                                    const goal = parseFloat(monthlyGoalInput.text);
+                                                    if (goal <= 0) return "0";
+                                                    return Math.min(100, Math.max(0, profit / goal * 100)).toFixed(0);
+                                                } catch (e) {
+                                                    return "0";
                                                 }
                                             }
                                         }
                                     }
-                                }
-                                
-                                Item { width: 1 } // 占位
-                            }
-                            
-                            // 结果反馈区
-                            Rectangle {
-                                id: monthlyGoalFeedback
-                                Layout.fillWidth: true
-                                height: 30
-                                color: isSuccess ? Qt.rgba(0.1, 0.6, 0.1, 0.1) : Qt.rgba(0.6, 0.1, 0.1, 0.1)
-                                border.color: isSuccess ? "#4caf50" : "#f44336"
-                                border.width: 1
-                                radius: 4
-                                visible: false
-                                property bool isSuccess: true
-                                
-                                RowLayout {
-                                    anchors.fill: parent
-                                    anchors.margins: 5
-                                    spacing: 10
                                     
-                                    Text {
-                                        text: isSuccess ? "✓" : "✗"
-                                        font.pixelSize: 16
-                                        font.bold: true
-                                        color: isSuccess ? "#4caf50" : "#f44336"
-                                    }
-                                    
-                                    Text {
-                                        id: monthlyGoalStatusText
-                                        text: monthlyGoalFeedback.isSuccess ? 
-                                              "月度目标设置成功！" : "设置失败，请重试"
-                                        color: monthlyGoalFeedback.isSuccess ? 
-                                               "#2ecc71" : "#e74c3c"
-                                        font.pixelSize: 13
+                                    // 进度条
+                                    Rectangle {
                                         Layout.fillWidth: true
-                                    }
-                                }
-                            }
-                            
-                            // 底部按钮区
-                            Item {
-                                Layout.fillWidth: true
-                                height: 40
-                                
-                                Button {
-                                    id: monthlyGoalButton
-                                    anchors.right: parent.right
-                                    width: 120
-                                    height: 36
-                                    text: "设置月度目标"
-                                    property bool isSettingNow: false
-                                    
-                                    background: Rectangle {
-                                        color: parent.isSettingNow ? Qt.lighter(buttonBgColor, 1.3) : buttonBgColor
-                                        radius: buttonRadius
-                                        border.color: buttonBorderColor
-                                        border.width: 1
-                                    }
-                                    
-                                    contentItem: Item {
-                                        RowLayout {
-                                            anchors.centerIn: parent
-                                            spacing: 5
+                                        height: 8
+                                        radius: 4
+                                        color: theme ? (theme.isDarkTheme ? Qt.rgba(0.2, 0.2, 0.25, 0.7) : Qt.rgba(0.9, 0.9, 0.9, 1.0)) : "#f0f0f0"
+                                        
+                                        Rectangle {
+                                            width: Math.max(0, Math.min(parent.width, parent.width * parseInt(currentMonthProgressText.text) / 100))
+                                            height: parent.height
+                                            radius: 4
+                                            color: (currentMonthProfitText.text.indexOf("-") === -1) ? profitColor : lossColor
                                             
-                                            BusyIndicator {
-                                                visible: monthlyGoalButton.isSettingNow
-                                                running: visible
-                                                width: 16
-                                                height: 16
-                                                Layout.preferredWidth: 16
-                                                Layout.preferredHeight: 16
-                                            }
-                                            
-                                            Text {
-                                                text: monthlyGoalButton.isSettingNow ? "设置中..." : "设置月度目标"
-                                                color: "white"
-                                                font.pixelSize: 14
-                                                font.family: buttonFontFamily
+                                            Behavior on width {
+                                                NumberAnimation { duration: 600; easing.type: Easing.OutCubic }
                                             }
                                         }
-                                    }
-                                    
-                                    Timer {
-                                        id: monthlyFeedbackTimer
-                                        interval: 3000
-                                        repeat: false
-                                        onTriggered: {
-                                            monthlyGoalFeedback.visible = false;
-                                        }
-                                    }
-                                    
-                                    Timer {
-                                        id: monthlyCooldownTimer
-                                        interval: 500
-                                        repeat: false
-                                        onTriggered: {
-                                            monthlyGoalButton.isSettingNow = false;
-                                        }
-                                    }
-                                    
-                                    onClicked: {
-                                        if (isSettingNow) return; // 防止重复点击
-                                        
-                                        // 显示设置中状态
-                                        isSettingNow = true;
-                                        
-                                        // 延迟执行设置操作
-                                        monthlyCooldownTimer.start();
-                                        
-                                        // 执行设置
-                                        var success = backend.setBudgetGoal(
-                                            yearField.value,
-                                            monthCombo.selectedMonthValue,
-                                            monthlyAmountField.value
-                                        );
-                                        
-                                        // 显示反馈
-                                        monthlyGoalFeedback.isSuccess = success;
-                                        monthlyGoalStatusText.text = success ? 
-                                                "月度目标设置成功！" : "设置失败，请重试";
-                                        monthlyGoalFeedback.visible = true;
-                                        
-                                        if (success) {
-                                            // 设置成功后发送交易变更信号，触发仪表盘刷新
-                                            backend.transactionsChanged();
-                                        }
-                                        
-                                        // 设置计时器在几秒后隐藏反馈
-                                        monthlyFeedbackTimer.start();
                                     }
                                 }
                             }
                         }
                     }
                     
-                    // 年度目标设置卡片
+                    // 年度目标设置卡片 - 使用相同风格
                     Rectangle {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: yearlyGoalContent.implicitHeight + 30
+                                            Layout.fillWidth: true
+                        implicitHeight: yearlyGoalContent.implicitHeight + 30
                         color: theme ? (theme.isDarkTheme ? Qt.rgba(0.2, 0.2, 0.25, 0.3) : Qt.rgba(0.97, 0.97, 1.0, 0.7)) : "#f5f5f5"
                         radius: 8
                         border.width: 1
@@ -1077,11 +1696,25 @@ Item {
                                 Layout.fillWidth: true
                                 spacing: 10
                                 
-                                Text {
+                                // 图标
+                                Rectangle {
+                                    width: 26
+                                    height: 26
+                                    radius: width/2
+                                    color: theme ? Qt.alpha(theme.primaryColor, 0.7) : "#4CAF50"
+                                    
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "📊"
+                                        font.pixelSize: 14
+                                            }
+                                        }
+                                        
+                                        Text {
                                     text: "年度目标"
                                     font.pixelSize: 15
                                     font.bold: true
-                                    color: theme ? theme.textColor : "black"
+                                            color: theme ? theme.textColor : "black"
                                 }
                                 
                                 Rectangle {
@@ -1089,312 +1722,195 @@ Item {
                                     height: 1
                                     color: theme ? (theme.isDarkTheme ? Qt.rgba(0.4, 0.4, 0.6, 0.5) : Qt.rgba(0.8, 0.8, 0.9, 0.8)) : "#d0d0d0"
                                 }
-                            }
-                            
+                                
+                                // 开启/关闭切换
+                                Rectangle {
+                                    width: 50
+                                    height: 24
+                                    radius: height/2
+                                    color: yearlyGoalSwitch.checked ? theme.primaryColor : 
+                                           (theme.isDarkTheme ? "#2c3e50" : "#d0d0d0")
+                                    
+                                    Rectangle {
+                                        width: 16
+                                        height: 16
+                                        radius: width/2
+                                        color: "white"
+                                        x: yearlyGoalSwitch.checked ? parent.width - width - 4 : 4
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        
+                                        Behavior on x {
+                                            NumberAnimation { duration: 150 }
+                                        }
+                                    }
+                                            
+                                            MouseArea {
+                                        id: yearlyGoalSwitch
+                                                anchors.fill: parent
+                                        property bool checked: true
+                                                onClicked: {
+                                            checked = !checked;
+                                            // TODO: Connect to backend
+                                            if (backend) {
+                                                backend.enableAnnualGoal(checked);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                
                             // 内容区
                             GridLayout {
                                 Layout.fillWidth: true
-                                columns: 3
+                                columns: 2
                                 rowSpacing: 15
                                 columnSpacing: 15
+                                enabled: yearlyGoalSwitch.checked
+                                opacity: yearlyGoalSwitch.checked ? 1.0 : 0.5
                                 
-                                // 金额
+                                Behavior on opacity {
+                                    NumberAnimation { duration: 150 }
+                                }
+                                
+                                // 年度目标金额
                                 Text {
-                                    text: "金额:"
+                                    text: "目标金额:"
                                     font.pixelSize: labelFontSize
                                     color: theme ? theme.textColor : "black"
                                 }
                                 
-                                Rectangle {
-                                    Layout.preferredWidth: 180
-                                    Layout.minimumWidth: 120
-                                    height: inputHeight
-                                    color: inputBgColor
-                                    border.color: inputBorderColor
-                                    border.width: 1
-                                    radius: inputRadius
+                                RowLayout {
+                                    spacing: 10
                                     
-                                    RowLayout {
-                                        anchors.fill: parent
-                                        anchors.leftMargin: 5
-                                        anchors.rightMargin: 5
-                                        spacing: 0
-                                        
-                                        Text {
-                                            text: "-"
-                                            font.pixelSize: 18
-                                            color: theme ? theme.textColor : "black"
-                                            Layout.preferredWidth: 25
-                                            horizontalAlignment: Text.AlignHCenter
-                                            
-                                            MouseArea {
-                                                anchors.fill: parent
-                                                onClicked: {
-                                                    var newValue = Math.max(0, yearlyAmountField.value - 10000);
-                                                    yearlyAmountField.text = newValue.toFixed(2);
-                                                    yearlyAmountField.value = newValue;
-                                                }
-                                            }
-                                        }
-                                        
-                                        TextInput {
-                                            id: yearlyAmountField
-                                            Layout.fillWidth: true
-                                            property real value: 50000
-                                            text: value.toFixed(2)
-                                            font.pixelSize: inputFontSize
-                                            color: inputTextColor
-                                            horizontalAlignment: Text.AlignHCenter
-                                            verticalAlignment: TextInput.AlignVCenter
-                                            validator: DoubleValidator { bottom: 0; notation: DoubleValidator.StandardNotation }
-                                            selectByMouse: true
-                                            
-                                            onTextChanged: {
-                                                if (text === "" || text === ".") return;
-                                                value = parseFloat(text);
-                                            }
-                                        }
-                                        
-                                        Text {
-                                            text: "+"
-                                            font.pixelSize: 18
-                                            color: theme ? theme.textColor : "black"
-                                            Layout.preferredWidth: 25
-                                            horizontalAlignment: Text.AlignHCenter
-                                            
-                                            MouseArea {
-                                                anchors.fill: parent
-                                                onClicked: {
-                                                    var newValue = yearlyAmountField.value + 10000;
-                                                    yearlyAmountField.text = newValue.toFixed(2);
-                                                    yearlyAmountField.value = newValue;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                Text {
-                                    text: "元"
-                                    font.pixelSize: labelFontSize - 2
-                                    color: Qt.darker(theme.textColor, 1.2)
-                                }
-                                
-                                // 年份
-                                Text {
-                                    text: "年份:"
-                                    font.pixelSize: labelFontSize
-                                    color: theme ? theme.textColor : "black"
-                                }
-                                
-                                Rectangle {
-                                    Layout.preferredWidth: 100
-                                    height: inputHeight
-                                    color: inputBgColor
-                                    border.color: inputBorderColor
-                                    border.width: 1
-                                    radius: inputRadius
-                                    
-                                    RowLayout {
-                                        anchors.fill: parent
-                                        anchors.leftMargin: 5
-                                        anchors.rightMargin: 5
-                                        spacing: 0
-                                        
-                                        Text {
-                                            text: "-"
-                                            font.pixelSize: 18
-                                            color: theme ? theme.textColor : "black"
-                                            Layout.preferredWidth: 25
-                                            horizontalAlignment: Text.AlignHCenter
-                                            
-                                            MouseArea {
-                                                anchors.fill: parent
-                                                onClicked: {
-                                                    var newValue = Math.max(2020, yearlyYearField.value - 1);
-                                                    yearlyYearField.text = newValue.toString();
-                                                    yearlyYearField.value = newValue;
-                                                }
-                                            }
-                                        }
-                                        
-                                        TextInput {
-                                            id: yearlyYearField
-                                            Layout.fillWidth: true
-                                            property int value: new Date().getFullYear()
-                                            text: value.toString()
-                                            font.pixelSize: inputFontSize
-                                            color: inputTextColor
-                                            horizontalAlignment: Text.AlignHCenter
-                                            verticalAlignment: TextInput.AlignVCenter
-                                            validator: IntValidator { bottom: 2020; top: 2100 }
-                                            selectByMouse: true
-                                            
-                                            onTextChanged: {
-                                                if (text === "") return;
-                                                var val = parseInt(text);
-                                                if (!isNaN(val)) value = val;
-                                            }
-                                        }
-                                        
-                                        Text {
-                                            text: "+"
-                                            font.pixelSize: 18
-                                            color: theme ? theme.textColor : "black"
-                                            Layout.preferredWidth: 25
-                                            horizontalAlignment: Text.AlignHCenter
-                                            
-                                            MouseArea {
-                                                anchors.fill: parent
-                                                onClicked: {
-                                                    var newValue = Math.min(2100, yearlyYearField.value + 1);
-                                                    yearlyYearField.text = newValue.toString();
-                                                    yearlyYearField.value = newValue;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                
-                                Item { width: 1 } // 占位
-                                
-                                // 说明文本
-                                Text {
-                                    Layout.columnSpan: 3
-                                    Layout.fillWidth: true
-                                    text: "注意：年度目标将平均分配到12个月"
-                                    font.pixelSize: 12
-                                    font.italic: true
-                                    color: Qt.darker(theme.textColor, 1.2)
-                                    opacity: 0.7
-                                }
-                            }
-                            
-                            // 结果反馈区
                             Rectangle {
-                                id: yearlyGoalFeedback
-                                Layout.fillWidth: true
-                                height: 30
-                                color: isSuccess ? Qt.rgba(0.1, 0.6, 0.1, 0.1) : Qt.rgba(0.6, 0.1, 0.1, 0.1)
-                                border.color: isSuccess ? "#4caf50" : "#f44336"
+                                        Layout.preferredWidth: 180
+                                        Layout.minimumWidth: 120
+                                        height: inputHeight
+                                        radius: inputRadius
+                                        color: inputBgColor
+                                        border.color: inputBorderColor
                                 border.width: 1
-                                radius: 4
-                                visible: false
-                                property bool isSuccess: true
                                 
                                 RowLayout {
                                     anchors.fill: parent
-                                    anchors.margins: 5
-                                    spacing: 10
+                                            anchors.leftMargin: 8
+                                            anchors.rightMargin: 8
+                                            spacing: 0
                                     
                                     Text {
-                                        text: isSuccess ? "✓" : "✗"
-                                        font.pixelSize: 16
-                                        font.bold: true
-                                        color: isSuccess ? "#4caf50" : "#f44336"
+                                                text: "¥"
+                                                color: inputTextColor
+                                                font.pixelSize: inputFontSize
+                                            }
+                                            
+                                            TextInput {
+                                                id: yearlyGoalInput
+                                        Layout.fillWidth: true
+                                                horizontalAlignment: TextInput.AlignRight
+                                                color: inputTextColor
+                                                font.pixelSize: inputFontSize
+                                                selectByMouse: true
+                                                validator: DoubleValidator {
+                                                    bottom: 0.0
+                                                    notation: DoubleValidator.StandardNotation
+                                                    decimals: 2
+                                                }
+                                                text: "12000.00" // Default value - should connect to backend
+                                                
+                                                onEditingFinished: {
+                                                    if (backend) {
+                                                        backend.setAnnualGoal(parseFloat(text) || 0);
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
                                     
-                                    Text {
-                                        id: yearlyGoalStatusText
-                                        text: yearlyGoalFeedback.isSuccess ? 
-                                              "年度目标设置成功！" : "设置失败，请重试"
-                                        color: yearlyGoalFeedback.isSuccess ? 
-                                               "#2ecc71" : "#e74c3c"
-                                        font.pixelSize: 13
-                                        Layout.fillWidth: true
+                                    // 重置按钮
+                                    CustomButton {
+                                        text: "重置"
+                                        implicitWidth: 70
+                                        onClicked: {
+                                            if (backend) {
+                                                backend.resetAnnualGoal();
+                                                yearlyGoalInput.text = "0.00";
+                                            }
+                                        }
                                     }
                                 }
-                            }
-                            
-                            // 底部按钮区
-                            Item {
-                                Layout.fillWidth: true
-                                height: 40
                                 
-                                Button {
-                                    id: yearlyGoalButton
-                                    anchors.right: parent.right
-                                    width: 120
-                                    height: 36
-                                    text: "设置年度目标"
-                                    property bool isSettingNow: false
+                                // 当前进度
+                                Text {
+                                    text: "当前进度:"
+                                    font.pixelSize: labelFontSize
+                                    color: theme ? theme.textColor : "black"
+                                }
+                                
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 8
                                     
-                                    background: Rectangle {
-                                        color: parent.isSettingNow ? Qt.lighter(buttonBgColor, 1.3) : buttonBgColor
-                                        radius: buttonRadius
-                                        border.color: buttonBorderColor
-                                        border.width: 1
-                                    }
-                                    
-                                    contentItem: Item {
+                                    // 进度文字
                                         RowLayout {
-                                            anchors.centerIn: parent
+                                        Layout.fillWidth: true
                                             spacing: 5
                                             
-                                            BusyIndicator {
-                                                visible: yearlyGoalButton.isSettingNow
-                                                running: visible
-                                                width: 16
-                                                height: 16
-                                                Layout.preferredWidth: 16
-                                                Layout.preferredHeight: 16
+                                        Text {
+                                            id: currentYearProfitText
+                                            text: "¥" + ((backend ? backend.getCurrentYearProfit() : 0) || 0).toFixed(2)
+                                            font.pixelSize: labelFontSize
+                                            font.bold: true
+                                            color: (currentYearProfitText.text.indexOf("-") === -1) ? profitColor : lossColor
                                             }
                                             
                                             Text {
-                                                text: yearlyGoalButton.isSettingNow ? "设置中..." : "设置年度目标"
-                                                color: "white"
-                                                font.pixelSize: 14
-                                                font.family: buttonFontFamily
+                                            text: " / ¥" + yearlyGoalInput.text
+                                            font.pixelSize: labelFontSize
+                                            color: theme ? theme.textColor : "black"
+                                        }
+                                        
+                                        Item { Layout.fillWidth: true }
+                                        
+                                        Text {
+                                            text: currentYearProgressText.text + "%"
+                                            font.pixelSize: labelFontSize
+                                            font.bold: true
+                                            color: (currentYearProfitText.text.indexOf("-") === -1) ? profitColor : lossColor
+                                        }
+                                        
+                                        Text {
+                                            id: currentYearProgressText
+                                            visible: false // 仅用于计算
+                                            text: {
+                                                try {
+                                                    const profit = parseFloat(currentYearProfitText.text.replace("¥", ""));
+                                                    const goal = parseFloat(yearlyGoalInput.text);
+                                                    if (goal <= 0) return "0";
+                                                    return Math.min(100, Math.max(0, profit / goal * 100)).toFixed(0);
+                                                } catch (e) {
+                                                    return "0";
+                                                }
                                             }
                                         }
                                     }
                                     
-                                    Timer {
-                                        id: yearlyFeedbackTimer
-                                        interval: 3000
-                                        repeat: false
-                                        onTriggered: {
-                                            yearlyGoalFeedback.visible = false;
+                                    // 进度条
+                                    Rectangle {
+                                        Layout.fillWidth: true
+                                        height: 8
+                                        radius: 4
+                                        color: theme ? (theme.isDarkTheme ? Qt.rgba(0.2, 0.2, 0.25, 0.7) : Qt.rgba(0.9, 0.9, 0.9, 1.0)) : "#f0f0f0"
+                                        
+                                        Rectangle {
+                                            width: Math.max(0, Math.min(parent.width, parent.width * parseInt(currentYearProgressText.text) / 100))
+                                            height: parent.height
+                                            radius: 4
+                                            color: (currentYearProfitText.text.indexOf("-") === -1) ? profitColor : lossColor
+                                            
+                                            Behavior on width {
+                                                NumberAnimation { duration: 600; easing.type: Easing.OutCubic }
+                                            }
                                         }
-                                    }
-                                    
-                                    Timer {
-                                        id: yearlyCooldownTimer
-                                        interval: 800
-                                        repeat: false
-                                        onTriggered: {
-                                            yearlyGoalButton.isSettingNow = false;
-                                        }
-                                    }
-                                    
-                                    onClicked: {
-                                        if (isSettingNow) return; // 防止重复点击
-                                        
-                                        // 显示设置中状态
-                                        isSettingNow = true;
-                                        
-                                        // 延迟执行设置操作
-                                        yearlyCooldownTimer.start();
-                                        
-                                        // 执行设置
-                                        var success = backend.setYearlyBudgetGoal(
-                                            yearlyYearField.value,
-                                            yearlyAmountField.value
-                                        );
-                                        
-                                        // 显示反馈
-                                        yearlyGoalFeedback.isSuccess = success;
-                                        yearlyGoalStatusText.text = success ? 
-                                                "年度目标设置成功！" : "设置失败，请重试";
-                                        yearlyGoalFeedback.visible = true;
-                                        
-                                        if (success) {
-                                            // 设置成功后发送交易变更信号，触发仪表盘刷新
-                                            backend.transactionsChanged();
-                                        }
-                                        
-                                        // 设置计时器在几秒后隐藏反馈
-                                        yearlyFeedbackTimer.start();
                                     }
                                 }
                             }
@@ -1405,12 +1921,12 @@ Item {
 
             // 软件更新
             Rectangle {
+                id: updateCard // Ensure unique ID
                 Layout.fillWidth: true
-                // height: 150  // 移除固定高度
-                implicitHeight: updateLayout.implicitHeight + 30 // 根据内容自动调整高度
+                implicitHeight: updateLayout.implicitHeight + 30
                 color: cardColor
-                radius: 5
-
+                radius: 5 // Keep original radius or update to 10 for consistency
+                 // ... DropShadow if needed ...
                 ColumnLayout {
                     id: updateLayout
                     anchors.fill: parent
@@ -1458,12 +1974,12 @@ Item {
             
             // 关于软件
             Rectangle {
+                id: aboutCard // Ensure unique ID
                 Layout.fillWidth: true
-                // height: 200  // 移除固定高度
-                implicitHeight: aboutLayout.implicitHeight + 30 // 根据内容自动调整高度
+                implicitHeight: aboutLayout.implicitHeight + 30
                 color: cardColor
-                radius: 5
-
+                radius: 5 // Keep original radius or update to 10 for consistency
+                // ... DropShadow if needed ...
                 ColumnLayout {
                     id: aboutLayout
                     anchors.fill: parent
@@ -1521,9 +2037,394 @@ Item {
                 }
             }
 
-            Item { height: 30 } // 底部间距
+            // 其他设置
+            Rectangle {
+                id: otherSettingsCard // Renamed to avoid conflict with layout id
+                Layout.fillWidth: true
+                implicitHeight: otherSettingsLayout.implicitHeight + 30
+                color: cardColor
+                radius: 10
+                 // ... DropShadow ...
+                ColumnLayout {
+                    id: otherSettingsLayout // This ID seems to be used for the content
+                    anchors.fill: parent
+                    anchors.margins: 15
+                    spacing: 16
+
+                    // 卡片标题
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 10
+                        
+                        Text {
+                            text: "其他设置"
+                            font.pixelSize: 16
+                            font.bold: true
+                            color: theme ? theme.textColor : "black"
+                        }
+                        
+                        Rectangle {
+                            Layout.fillWidth: true
+                            height: 1
+                            color: theme ? Qt.alpha(theme.borderColor, 0.5) : "#e0e0e0"
+                        }
+                    }
+                    
+                    // 说明文本
+                    Text {
+                        text: "其他系统设置和高级选项"
+                        font.pixelSize: 12
+                        color: Qt.darker(textColor, 1.2)
+                        opacity: 0.8
+                        Layout.fillWidth: true
+                        wrapMode: Text.WordWrap
+                    }
+
+                    // 添加分隔线
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 1
+                        color: inputBorderColor
+                        opacity: 0.5
+                        Layout.topMargin: 5
+                        Layout.bottomMargin: 5
+                    }
+
+                    // 其他设置内容 - 使用更现代的设计
+                    Rectangle {
+                        Layout.fillWidth: true
+                        implicitHeight: miscSettingsContent.implicitHeight + 30
+                        color: theme ? (theme.isDarkTheme ? Qt.rgba(0.2, 0.2, 0.25, 0.3) : Qt.rgba(0.97, 0.97, 1.0, 0.7)) : "#f5f5f5"
+                        radius: 8
+                        border.width: 1
+                        border.color: theme ? (theme.isDarkTheme ? Qt.rgba(0.3, 0.3, 0.5, 0.5) : Qt.rgba(0.8, 0.8, 0.9, 1.0)) : "#d0d0d0"
+                        
+                        ColumnLayout {
+                            id: miscSettingsContent
+                            anchors.fill: parent
+                            anchors.margins: 15
+                            spacing: 15
+                            
+                            // 数据安全设置
+                            GridLayout {
+                                Layout.fillWidth: true
+                                columns: 2
+                                rowSpacing: 15
+                                columnSpacing: 15
+                                
+                                // 自动保存间隔
+                                Text {
+                                    text: "自动保存间隔:"
+                                    font.pixelSize: labelFontSize
+                                    color: theme ? theme.textColor : "black"
+                                }
+                                
+                                RowLayout {
+                                    spacing: 10
+                                    
+                                    CustomSpinBox {
+                                        id: autoSaveIntervalInput
+                                        value: 5
+                                        from: 1
+                                        to: 60
+                                        stepSize: 1
+                                        
+                                        onValueChanged: {
+                                            if (backend) {
+                                                backend.setAutoSaveInterval(value);
+                                            }
+                                        }
+                                    }
+                                    
+                                    Text {
+                                        text: "分钟"
+                                        font.pixelSize: labelFontSize - 2
+                                        color: Qt.darker(theme.textColor, 1.2)
+                                    }
+                                }
+                                
+                                // 登录时加载上次数据
+                                Text {
+                                    text: "登录时加载上次数据:"
+                                    font.pixelSize: labelFontSize
+                                    color: theme ? theme.textColor : "black"
+                                }
+                                
+                                CustomCheckBox {
+                                    id: loadLastDataCheck
+                                    text: ""
+                                    checked: true
+                                    
+                                    onCheckClicked: {
+                                        if (backend) {
+                                            backend.setLoadLastDataOnStartup(checked);
+                                        }
+                                    }
+                                }
+                                
+                                // 自动检查更新
+                                Text {
+                                    text: "自动检查更新:"
+                                    font.pixelSize: labelFontSize
+                                    color: theme ? theme.textColor : "black"
+                                }
+                                
+                                CustomCheckBox {
+                                    id: autoCheckUpdateCheck
+                                    text: ""
+                                    checked: true
+                                    
+                                    onCheckClicked: {
+                                        if (backend) {
+                                            backend.setAutoCheckUpdate(checked);
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // 高级选项
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 10
+                                
+                                Text {
+                                    text: "高级选项"
+                                    font.pixelSize: 14
+                                    font.bold: true
+                                    color: theme ? theme.textColor : "black"
+                                }
+                                
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    height: 1
+                                    color: theme ? Qt.alpha(theme.borderColor, 0.3) : "#e0e0e0"
+                                }
+                                
+                                // 高级选项按钮组
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 10
+                                    
+                                    CustomButton {
+                                        text: "导出数据"
+                                        implicitWidth: 100
+                                        
+                                        onClicked: {
+                                            if (backend) {
+                                                backend.exportData();
+                                            }
+                                        }
+                                    }
+                                    
+                                    CustomButton {
+                                        text: "导入数据"
+                                        implicitWidth: 100
+                                        
+                                        onClicked: {
+                                            if (backend) {
+                                                backend.importData();
+                                            }
+                                        }
+                                    }
+                                    
+                                    CustomButton {
+                                        text: "清理缓存"
+                                        implicitWidth: 100
+                                        
+                                        onClicked: {
+                                            if (backend) {
+                                                backend.clearCache();
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                // 数据重置按钮组
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 10
+                                    Layout.topMargin: 5
+                                    
+                                    CustomButton {
+                                        text: "重置所有设置"
+                                        implicitWidth: 130
+                                        bgColor: "#ff9800"
+                                        
+                                        onClicked: {
+                                            confirmResetSettingsDialog.open();
+                                        }
+                                    }
+                                    
+                                    Item { Layout.fillWidth: true }
+                                    
+                                    CustomButton {
+                                        text: "删除所有数据"
+                                        implicitWidth: 130
+                                        bgColor: "#f44336"
+                                        
+                                        onClicked: {
+                                            confirmDeleteDataDialog.open();
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // 版本信息
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Layout.topMargin: 10
+                                spacing: 10
+                                
+                                Text {
+                                    text: "当前版本:"
+                                    font.pixelSize: 12
+                                    color: Qt.darker(theme.textColor, 1.1)
+                                }
+                                
+                                Text {
+                                    id: versionText
+                                    text: backend ? backend.getVersion() : "1.0.0"
+                                    font.pixelSize: 12
+                                    font.bold: true
+                                    color: Qt.darker(theme.textColor, 1.1)
+                                }
+                                
+                                Item { Layout.fillWidth: true }
+                                
+                                Text {
+                                    text: "<a href='https://github.com/username/invest-ledger'>GitHub</a>"
+                                    font.pixelSize: 12
+                                    color: theme.linkColor
+                                    linkColor: theme.linkColor
+                                    onLinkActivated: Qt.openUrlExternally(link)
+                                }
+                                
+                                Text {
+                                    text: "|"
+                                    font.pixelSize: 12
+                                    color: Qt.darker(theme.textColor, 1.1)
+                                }
+                                
+                                Text {
+                                    text: "<a href='https://example.com/docs'>文档</a>"
+                                    font.pixelSize: 12
+                                    color: theme.linkColor
+                                    linkColor: theme.linkColor
+                                    onLinkActivated: Qt.openUrlExternally(link)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Item { height: 30 } // Bottom spacing
         }
-    } // ScrollView end
+
+        // Custom Scrollbar, placed as a sibling to Flickable, anchored to the main Item (settingsView)
+        Rectangle {
+            id: customScrollbar
+            width: flickableArea.contentHeight > flickableArea.height ? 8 : 0 // Only show if scrollable, adjust width
+            radius: width / 2
+            color: "transparent"
+            z: 1000
+
+            // Anchor to the parent (settingsView) edges, then use flickableArea for positioning
+            anchors.top: parent.top // Anchors to settingsView.top
+            anchors.topMargin: flickableArea.y // Position relative to flickableArea's top
+            height: flickableArea.height       // Match flickableArea's height
+
+            // Position it to the right of flickableArea
+            x: flickableArea.x + flickableArea.width - width - 2 // 2 for margin
+            
+            // opacity: flickableArea.contentHeight > flickableArea.height ? 
+            //         (scrollbarMouseArea.containsMouse || scrollbarMouseArea.pressed ? 1.0 : 0.7) : 0.0
+            // visible: opacity > 0
+
+
+            Behavior on opacity {
+                NumberAnimation { duration: 300 }
+            }
+            // Behavior on width { // Animate width change for appearing/disappearing
+            //     NumberAnimation { duration: 200 }
+            // }
+
+            // Ensure opacity and visible are correctly set based on original logic
+            opacity: flickableArea.contentHeight > flickableArea.height ?
+                    (scrollbarMouseArea.containsMouse || scrollbarMouseArea.pressed ? 1.0 : 0.7) : 0.0
+            visible: opacity > 0
+
+
+            Rectangle {
+                // Scrollbar track background
+                anchors.fill: parent
+                color: theme ? (theme.isDarkTheme ? Qt.rgba(1, 1, 1, 0.1) : Qt.rgba(0, 0, 0, 0.08)) : Qt.rgba(0, 0, 0, 0.08)
+                radius: parent.radius
+            }
+
+            Rectangle {
+                // Scrollbar handle
+                id: scrollHandle
+                width: parent.width
+                radius: width / 2
+                color: scrollbarMouseArea.pressed ? 
+                       Qt.darker(theme ? theme.primaryColor : "#4CAF50", 1.2) : 
+                       (theme ? theme.primaryColor : "#4CAF50")
+                opacity: scrollbarMouseArea.containsMouse ? 0.9 : 0.7
+                
+                height: Math.max(30, flickableArea.height * (flickableArea.height / Math.max(1, flickableArea.contentHeight)))
+                y: (flickableArea.height - height) * (flickableArea.contentY / Math.max(1, flickableArea.contentHeight - flickableArea.height))
+                
+                Behavior on y { enabled: !scrollbarMouseArea.pressed; NumberAnimation { duration: 50; easing.type: Easing.OutQuad } }
+                Behavior on height { NumberAnimation { duration: 150 } }
+            }
+            
+            MouseArea {
+                id: scrollbarMouseArea
+                anchors.fill: parent
+                anchors.leftMargin: -parent.width // Make it easier to grab
+                anchors.rightMargin: -parent.width / 2
+                hoverEnabled: true
+                preventStealing: true // Try to prevent Flickable from stealing events
+
+                property real dragStartContentY: 0
+                property real dragStartMouseY: 0
+                
+                onPressed: (mouse) => {
+                    dragStartMouseY = mouse.y;
+                    dragStartContentY = flickableArea.contentY;
+                    mouse.accepted = true; // Accept the event
+                }
+                
+                onMouseYChanged: (mouse) => { // Changed from onPositionChanged to be more specific
+                    if (pressed) {
+                        var scrollableHeight = flickableArea.contentHeight - flickableArea.height;
+                        if (scrollableHeight <= 0) return;
+
+                        var handleVisibleRatio = scrollHandle.height / customScrollbar.height;
+                        var scrollbarEffectiveHeight = customScrollbar.height * (1 - handleVisibleRatio); // The range the top of the handle can travel
+                        if (scrollbarEffectiveHeight <=0) return;
+                        
+                        var dy = mouse.y - dragStartMouseY;
+                        var contentDelta = (dy / scrollbarEffectiveHeight) * scrollableHeight; 
+                        flickableArea.contentY = Math.max(0, Math.min(scrollableHeight, dragStartContentY + contentDelta));
+                        mouse.accepted = true;
+                    }
+                }
+                
+                onReleased: (mouse) => {
+                     mouse.accepted = true; // Ensure event is consumed
+                }
+
+                onWheel: (wheel) => {
+                    var newContentY = flickableArea.contentY - (wheel.angleDelta.y / 120 * 40); // Standard scroll speed
+                    var scrollableHeight = flickableArea.contentHeight - flickableArea.height;
+                    flickableArea.contentY = Math.max(0, Math.min(scrollableHeight, newContentY));
+                    wheel.accepted = true;
+                }
+            }
+        }
+    }
 
     // 保存成功对话框 (已移除，因为不再有全局保存按钮)
     /*
@@ -1556,6 +2457,7 @@ Item {
         closePolicy: Popup.CloseOnEscape
 
         contentItem: ColumnLayout {
+            width: parent.width // Make ColumnLayout take the Dialog's content area width
             spacing: 20
 
             Text {
@@ -1610,6 +2512,8 @@ Item {
         title: "检查更新"
         standardButtons: Dialog.Ok
         modal: true
+        width: 300 // <--- 添加一个明确的宽度
+
         contentItem: Text {
             text: "您已经使用最新版本！"
             wrapMode: Text.WordWrap

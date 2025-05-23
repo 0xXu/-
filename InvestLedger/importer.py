@@ -243,7 +243,7 @@ class DataImporter:
                 unit_price=profit_loss,  # 用盈亏金额作为单价
                 currency="CNY",  # 默认为人民币
                 profit_loss=profit_loss,
-                notes=line  # 原始文本作为备注
+                notes=""  # 不再将原始文本作为备注
             ), None
             
         except Exception as e:

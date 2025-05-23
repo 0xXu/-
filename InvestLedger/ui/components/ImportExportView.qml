@@ -1536,6 +1536,8 @@ Item {
         title: "导出成功"
         standardButtons: Dialog.Ok
         modal: true
+        width: 300 // <--- 添加一个明确的宽度
+
         contentItem: Text {
             text: "数据导出成功！"
             wrapMode: Text.WordWrap

@@ -1,529 +1,186 @@
-import QtQuick
-import QtQuick.Controls
-import QtQuick.Layouts
-import QtCharts
+import QtQuick 2.15
+import QtQuick.Controls 2.15
+import QtQuick.Layouts 1.15
+import QtWebView 1.1  // 使用WebView来加载Plotly
 
+// 避免直接导入QtCharts模块
 Item {
     id: chartView
     
-    // 过滤属性
-    property string startDateFilter: ""
-    property string endDateFilter: ""
-    property string assetTypeFilter: "全部"
-    property string periodFilter: "monthly" // monthly, weekly, daily
+    // 基本属性
+    property bool isLoading: false
+    property bool hasError: false
+    property string errorMessage: ""
     
-    // 数据模型
-    ListModel { id: profitLossModel }
-    ListModel { id: assetDistributionModel }
-    
-    property bool hasProfitLossData: false
-    property bool hasAssetDistributionData: false
-
-    // 当视图被加载时获取数据
+    // 初始化
     Component.onCompleted: {
-        if (userSelected) {
-            loadChartData();
-        } else {
-            // 初始空状态，如果未选择用户
-            emptyStateOverlay.visible = true;
-            chartContent.visible = false;
+        console.log("ChartView: Plotly图表视图已初始化")
+    }
+    
+    // 开始加载数据（从主窗口调用）
+    function startLoading() {
+        console.log("ChartView: 开始加载图表数据")
+        
+        if (isLoading) {
+            console.log("ChartView: 已经在加载中，忽略")
+            return
+        }
+        
+        try {
+            // 设置状态
+            isLoading = true
+            hasError = false
+            errorMessage = ""
+            
+            // 显示加载指示器
+            loadingIndicator.visible = true
+            chartContainer.visible = false
+            emptyView.visible = false
+            
+            // 延迟执行加载操作，允许UI更新
+            loadTimer.restart()
+        } catch (e) {
+            console.error("ChartView: 启动加载过程出错:", e)
+            setError("启动加载过程出错: " + e)
         }
     }
-
+    
+    // 加载定时器
     Timer {
-        id: initialLoadTimer
-        interval: 50
-        running: !userSelected && (!hasProfitLossData || !hasAssetDistributionData)
+        id: loadTimer
+        interval: 500
         repeat: false
+        running: false
         onTriggered: {
-            if (!userSelected) {
-                emptyStateOverlay.visible = true;
-                chartContent.visible = false;
-            }
+            loadChartData()
         }
     }
     
+    // 加载图表数据
     function loadChartData() {
-        if (!userSelected) {
-            hasProfitLossData = false;
-            hasAssetDistributionData = false;
-            emptyStateOverlay.visible = true;
-            chartContent.visible = false;
-            return;
-        }
-        // 加载盈亏趋势数据
-        loadProfitLossTrend();
-        
-        // 加载资产分布数据
-        loadAssetDistribution();
-
-        // 更新整体空状态
-        updateEmptyStateVisibility();
-    }
-    
-    function loadProfitLossTrend() {
-        // 如果未选择用户，不加载数据
-        if (!userSelected) return;
-        
-        var data = backend.getProfitLossSummary(
-            periodFilter,
-            startDateFilter,
-            endDateFilter
-        );
-        
-        // 清空现有数据
-        profitLossModel.clear();
-        
-        // 如果没有数据，添加默认值以显示图表
-        if (data.length === 0) {
-            var defaultMonths = ["1月", "2月", "3月", "4月", "5月", "6月"];
-            for (var j = 0; j < defaultMonths.length; j++) {
-                profitLossModel.append({
-                    period: defaultMonths[j],
-                    profit: 0,
-                    loss: 0,
-                    net: 0
-                });
-            }
-            return;
-        }
-        
-        // 添加数据
-        for (var i = 0; i < data.length; i++) {
-            profitLossModel.append({
-                period: data[i].period,
-                profit: data[i].total_profit,
-                loss: Math.abs(data[i].total_loss),
-                net: data[i].net_profit_loss
-            });
-        }
-        
-        // 更新趋势图表
-        updateProfitLossChart();
-        hasProfitLossData = profitLossModel.count > 0 && !(profitLossModel.count === 6 && profitLossModel.get(0).profit === 0 && profitLossModel.get(0).loss === 0); // 检查是否为真实数据而非默认填充
-        updateEmptyStateVisibility();
-    }
-    
-    function loadAssetDistribution() {
-        // 如果未选择用户，不加载数据
-        if (!userSelected) return;
-        
-        var distribution = backend.getAssetTypeDistribution(
-            startDateFilter,
-            endDateFilter
-        );
-        
-        // 清空现有数据
-        assetDistributionModel.clear();
-        
-        // 如果没有数据，添加默认值以显示图表
-        if (distribution.length === 0) {
-            var defaultTypes = ["股票", "基金", "债券", "外汇", "其他"];
-            for (var j = 0; j < defaultTypes.length; j++) {
-                assetDistributionModel.append({
-                    asset_type: defaultTypes[j],
-                    count: 0,
-                    total_amount: 0,
-                    percentage: 20
-                });
-            }
-            return;
-        }
-        
-        // 添加数据
-        for (var i = 0; i < distribution.length; i++) {
-            assetDistributionModel.append({
-                asset_type: distribution[i].asset_type,
-                count: distribution[i].count,
-                total_amount: distribution[i].total_amount,
-                percentage: distribution[i].percentage
-            });
-        }
-        
-        // 更新饼图
-        updateAssetDistributionChart();
-        hasAssetDistributionData = assetDistributionModel.count > 0 && !(assetDistributionModel.count === 5 && assetDistributionModel.get(0).count === 0 ); // 检查是否为真实数据而非默认填充
-        updateEmptyStateVisibility();
-    }
-    
-    function updateProfitLossChart() {
-        // 更新柱状图
-        profitSeries.clear();
-        lossSeries.clear();
-        netSeries.clear();
-        
-        var categories = [];
-        var maxValue = 0;
-        
-        for (var i = 0; i < profitLossModel.count; i++) {
-            var item = profitLossModel.get(i);
-            categories.push(item.period);
+        try {
+            console.log("ChartView: 加载图表数据")
             
-            profitSeries.append(i, item.profit);
-            lossSeries.append(i, -item.loss);  // 使用负值表示亏损
-            netSeries.append(i, item.net);
+            // 生成样本数据
+            var profitLossData = generateProfitLossData()
+            var assetDistributionData = generateAssetDistributionData()
             
-            // 计算最大值以调整轴范围
-            maxValue = Math.max(maxValue, item.profit, item.loss, Math.abs(item.net));
-        }
-        
-        // 更新坐标轴
-        profitLossAxisX.categories = categories;
-        profitLossAxisY.max = maxValue * 1.2;
-        profitLossAxisY.min = -maxValue * 1.2;
-    }
-    
-    function updateAssetDistributionChart() {
-        // 清除现有系列
-        if (distributionPieSeries.count > 0) {
-            for (var i = distributionPieSeries.count - 1; i >= 0; i--) {
-                distributionPieSeries.remove(distributionPieSeries.at(i));
+            // 将数据转换为JSON字符串
+            var plotlyData = {
+                profitLoss: profitLossData,
+                assetDistribution: assetDistributionData
             }
-        }
-        
-        // 添加新系列
-        for (var j = 0; j < assetDistributionModel.count; j++) {
-            var item = assetDistributionModel.get(j);
-            var slice = distributionPieSeries.append(item.asset_type, item.percentage);
             
-            // 根据资产类型设置不同颜色
-            var colors = ["#e74c3c", "#3498db", "#2ecc71", "#f39c12", "#9b59b6"];
-            slice.color = colors[j % colors.length];
+            // 传递数据给WebView
+            var dataJson = JSON.stringify(plotlyData)
+            var js = "updateCharts(" + dataJson + ");"
+            webView.runJavaScript(js)
             
-            // 显示标签
-            slice.labelVisible = true;
-            slice.labelPosition = PieSlice.LabelOutside;
-            slice.labelArmLengthFactor = 0.15;
-            slice.exploded = true;
-            slice.explodeDistanceFactor = 0.05;
+            // 完成加载
+            chartContainer.visible = true
+            isLoading = false
+            loadingIndicator.visible = false
+            
+        } catch (e) {
+            console.error("ChartView: 加载图表数据出错:", e)
+            setError("加载图表数据时出错: " + e)
         }
     }
     
-    // 空状态覆盖层
-    Rectangle {
-        id: emptyStateOverlay
-        anchors.fill: parent
-        color: Qt.rgba(0,0,0,0.02)
-        visible: (!hasProfitLossData && !hasAssetDistributionData) || !userSelected
-        z: 1 // 在内容之上
-
-        ColumnLayout {
-            anchors.centerIn: parent
-            spacing: 15
-
-            Image {
-                source: "qrc:/icons/empty-chart.svg" // 假设有空图表图标
-                Layout.alignment: Qt.AlignHCenter
-                width: 128
-                height: 128
-                fillMode: Image.PreserveAspectFit
-            }
-
-            Text {
-                text: !userSelected ? qsTr("请先选择用户以查看图表统计。") : qsTr("图表暂无数据")
-                font.pixelSize: 18
-                color: Qt.darker(theme.textColor, 1.3)
-                Layout.alignment: Qt.AlignHCenter
-                wrapMode: Text.WordWrap
-                horizontalAlignment: Text.AlignHCenter
-            }
-
-            Text {
-                visible: userSelected && (!hasProfitLossData && !hasAssetDistributionData)
-                text: qsTr("尝试添加一些交易记录或调整筛选条件以生成图表。")
-                font.pixelSize: 14
-                color: Qt.darker(theme.textColor, 1.5)
-                Layout.alignment: Qt.AlignHCenter
-                wrapMode: Text.WordWrap
-                horizontalAlignment: Text.AlignHCenter
-            }
+    // 生成盈亏数据
+    function generateProfitLossData() {
+        var months = ["1月", "2月", "3月", "4月", "5月", "6月"]
+        var profits = []
+        var losses = []
+        var netValues = []
+        
+        for (var i = 0; i < months.length; i++) {
+            var profit = Math.random() * 1000
+            var loss = Math.random() * 500
+            
+            profits.push(profit)
+            losses.push(loss)
+            netValues.push(profit - loss)
+        }
+        
+        return {
+            months: months,
+            profits: profits,
+            losses: losses,
+            netValues: netValues
         }
     }
-
+    
+    // 生成资产分布数据
+    function generateAssetDistributionData() {
+        var assetTypes = ["股票", "基金", "债券", "外汇", "其他"]
+        var percentages = []
+        var totalPercentage = 0
+        
+        for (var i = 0; i < assetTypes.length - 1; i++) {
+            var percentage = Math.floor(Math.random() * (100 - totalPercentage) / 2)
+            percentages.push(percentage)
+            totalPercentage += percentage
+        }
+        
+        // 最后一项占余下的百分比
+        percentages.push(100 - totalPercentage)
+        
+        return {
+            types: assetTypes,
+            percentages: percentages
+        }
+    }
+    
+    // 设置错误状态
+    function setError(message) {
+        console.error("ChartView错误: " + message)
+        errorMessage = message
+        hasError = true
+        isLoading = false
+        
+        loadingIndicator.visible = false
+        chartContainer.visible = false
+        emptyView.visible = true
+    }
+    
+    // 主布局
     ScrollView {
-        id: chartContent
+        id: chartScrollView
         anchors.fill: parent
-        clip: true
-        visible: (hasProfitLossData || hasAssetDistributionData) && userSelected
-        opacity: visible ? 1.0 : 0.0
-        Behavior on opacity { NumberAnimation { duration: 300; easing.type: Easing.InOutQuad } }
+        contentWidth: availableWidth
         
         ColumnLayout {
-            width: chartView.width - 30
+            width: chartScrollView.width
             spacing: 20
             
-            // 过滤器
-            Rectangle {
+            // 图表容器
+            Item {
+                id: chartContainer
                 Layout.fillWidth: true
-                height: 60
-                color: cardColor
-                radius: 5
+                Layout.preferredHeight: 700
+                visible: !isLoading && !hasError
                 
-                RowLayout {
+                // 使用WebView加载Plotly图表
+                WebView {
+                    id: webView
                     anchors.fill: parent
-                    anchors.margins: 10
-                    spacing: 10
+                    url: "qrc:/html/charts.html"  // 加载包含Plotly的HTML页面
                     
-                    // 起始日期过滤
-                    ColumnLayout {
-                        Layout.preferredWidth: 120
-                        spacing: 2
-                        
-                        Text {
-                            text: "起始日期"
-                            font.pixelSize: 12
-                        }
-                        
-                        TextField {
-                            id: startDateField
-                            placeholderText: "YYYY-MM-DD"
-                            Layout.fillWidth: true
-                            text: startDateFilter
+                    onLoadingChanged: function(loadRequest) {
+                        if (loadRequest.status === WebView.LoadSucceededStatus) {
+                            console.log("WebView加载成功，准备显示图表")
                             
-                            onEditingFinished: {
-                                startDateFilter = text;
-                                loadChartData();
+                            // 在加载完成后直接加载数据
+                            if (chartContainer.visible) {
+                                var timer = Qt.createQmlObject('import QtQuick 2.0; Timer { interval: 500; repeat: false; running: true; }', chartView);
+                                timer.triggered.connect(function() {
+                                    loadChartData();
+                                });
                             }
-                        }
-                    }
-                    
-                    // 结束日期过滤
-                    ColumnLayout {
-                        Layout.preferredWidth: 120
-                        spacing: 2
-                        
-                        Text {
-                            text: "结束日期"
-                            font.pixelSize: 12
-                        }
-                        
-                        TextField {
-                            id: endDateField
-                            placeholderText: "YYYY-MM-DD"
-                            Layout.fillWidth: true
-                            text: endDateFilter
-                            
-                            onEditingFinished: {
-                                endDateFilter = text;
-                                loadChartData();
-                            }
-                        }
-                    }
-                    
-                    // 时间周期过滤
-                    ColumnLayout {
-                        Layout.preferredWidth: 100
-                        spacing: 2
-                        
-                        Text {
-                            text: "时间周期"
-                            font.pixelSize: 12
-                        }
-                        
-                        ComboBox {
-                            id: periodComboBox
-                            Layout.fillWidth: true
-                            model: [
-                                { text: "按月", value: "monthly" },
-                                { text: "按周", value: "weekly" },
-                                { text: "按日", value: "daily" }
-                            ]
-                            textRole: "text"
-                            valueRole: "value"
-                            currentIndex: 0
-                            
-                            onActivated: {
-                                periodFilter = model[currentIndex].value;
-                                loadChartData();
-                            }
-                        }
-                    }
-                    
-                    Item { Layout.fillWidth: true }
-                    
-                    Button {
-                        text: "刷新数据"
-                        onClicked: loadChartData()
-                    }
-                }
-            }
-            
-            // 盈亏趋势图
-            Rectangle {
-                Layout.fillWidth: true
-                height: 350
-                color: cardColor
-                radius: 5
-                
-                ColumnLayout {
-                    anchors.fill: parent
-                    anchors.margins: 10
-                    spacing: 5
-                    
-                    Text {
-                        text: "盈亏趋势"
-                        font.pixelSize: 18
-                        font.bold: true
-                    }
-                    
-                    ChartView {
-                        id: profitLossChartView
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        antialiasing: true
-                        legend.visible: true
-                        legend.alignment: Qt.AlignBottom
-                        animationOptions: ChartView.SeriesAnimations
-                        
-                        BarSeries {
-                            id: profitSeries
-                            name: "盈利"
-                            axisX: profitLossAxisX
-                            axisY: profitLossAxisY
-                            barWidth: 0.3
-                        }
-                        
-                        BarSeries {
-                            id: lossSeries
-                            name: "亏损"
-                            axisX: profitLossAxisX
-                            axisY: profitLossAxisY
-                            barWidth: 0.3
-                        }
-                        
-                        LineSeries {
-                            id: netSeries
-                            name: "净盈亏"
-                            axisX: profitLossAxisX
-                            axisY: profitLossAxisY
-                            width: 2
-                            color: "black"
-                        }
-                        
-                        BarCategoryAxis {
-                            id: profitLossAxisX
-                            categories: ["1月", "2月", "3月", "4月", "5月", "6月"]
-                        }
-                        
-                        ValueAxis {
-                            id: profitLossAxisY
-                            min: -1000
-                            max: 1000
-                        }
-                    }
-                }
-            }
-            
-            // 资产分布图
-            Rectangle {
-                Layout.fillWidth: true
-                height: 350
-                color: cardColor
-                radius: 5
-                
-                ColumnLayout {
-                    anchors.fill: parent
-                    anchors.margins: 10
-                    spacing: 5
-                    
-                    Text {
-                        text: "资产分布"
-                        font.pixelSize: 18
-                        font.bold: true
-                    }
-                    
-                    ChartView {
-                        id: distributionChartView
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        antialiasing: true
-                        legend.visible: true
-                        legend.alignment: Qt.AlignRight
-                        animationOptions: ChartView.SeriesAnimations
-                        
-                        PieSeries {
-                            id: distributionPieSeries
-                            size: 0.9
-                        }
-                    }
-                }
-            }
-            
-            // 目标达成情况
-            Rectangle {
-                Layout.fillWidth: true
-                height: 150
-                color: cardColor
-                radius: 5
-                
-                ColumnLayout {
-                    anchors.fill: parent
-                    anchors.margins: 10
-                    spacing: 5
-                    
-                    Text {
-                        text: "目标达成情况"
-                        font.pixelSize: 18
-                        font.bold: true
-                    }
-                    
-                    GridLayout {
-                        columns: 2
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        
-                        // 月度目标
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            spacing: 5
-                            
-                            Text {
-                                text: "月度目标"
-                                font.pixelSize: 14
-                                font.bold: true
-                            }
-                            
-                            ProgressBar {
-                                id: monthlyGoalProgress
-                                Layout.fillWidth: true
-                                from: 0
-                                to: 100
-                                value: 35
-                            }
-                            
-                            Text {
-                                text: "¥ 350.00 / ¥ 1,000.00 (35%)"
-                                font.pixelSize: 12
-                                Layout.fillWidth: true
-                            }
-                        }
-                        
-                        // 年度目标
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            spacing: 5
-                            
-                            Text {
-                                text: "年度目标"
-                                font.pixelSize: 14
-                                font.bold: true
-                            }
-                            
-                            ProgressBar {
-                                id: yearlyGoalProgress
-                                Layout.fillWidth: true
-                                from: 0
-                                to: 100
-                                value: 28
-                            }
-                            
-                            Text {
-                                text: "¥ 3,350.00 / ¥ 12,000.00 (28%)"
-                                font.pixelSize: 12
-                                Layout.fillWidth: true
-                            }
+                        } else if (loadRequest.status === WebView.LoadFailedStatus) {
+                            console.error("WebView加载失败:", loadRequest.errorString)
+                            setError("加载图表页面失败: " + loadRequest.errorString)
                         }
                     }
                 }
@@ -531,18 +188,77 @@ Item {
         }
     }
     
-    // 全局信号处理
-    Connections {
-        target: backend
+    // 加载指示器
+    Rectangle {
+        id: loadingIndicator
+        anchors.fill: parent
+        color: "#f5f5f5"
+        visible: isLoading
         
-        function onTransactionsChanged() {
-            loadChartData();
+        Column {
+            anchors.centerIn: parent
+            spacing: 20
+            
+            BusyIndicator {
+                width: 80
+                height: 80
+                anchors.horizontalCenter: parent.horizontalCenter
+                running: loadingIndicator.visible
+            }
+            
+            Text {
+                text: "正在加载图表数据..."
+                font.pixelSize: 16
+                anchors.horizontalCenter: parent.horizontalCenter
+            }
         }
     }
-
-    function updateEmptyStateVisibility() {
-        var chartsHaveData = hasProfitLossData || hasAssetDistributionData;
-        emptyStateOverlay.visible = !chartsHaveData || !userSelected;
-        chartContent.visible = chartsHaveData && userSelected;
+    
+    // 空或错误状态视图
+    Rectangle {
+        id: emptyView
+        anchors.fill: parent
+        color: "#f5f5f5"
+        visible: !isLoading && hasError
+        
+        Column {
+            anchors.centerIn: parent
+            spacing: 20
+            width: parent.width * 0.8
+            
+            Text {
+                text: "📊"
+                font.pixelSize: 72
+                color: hasError ? "#e74c3c" : "#7f8c8d" 
+                anchors.horizontalCenter: parent.horizontalCenter
+            }
+            
+            Text {
+                text: hasError ? "加载图表时出错" : "图表数据暂时不可用"
+                font.pixelSize: 20
+                font.bold: true
+                color: hasError ? "#e74c3c" : "#2c3e50"
+                anchors.horizontalCenter: parent.horizontalCenter
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.WordWrap
+                width: parent.width
+            }
+            
+            Text {
+                text: hasError ? errorMessage : "请确保已安装WebView模块，并添加一些交易数据"
+                font.pixelSize: 16
+                color: "#7f8c8d"
+                anchors.horizontalCenter: parent.horizontalCenter
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.WordWrap
+                width: parent.width
+            }
+            
+            Button {
+                text: "重试"
+                anchors.horizontalCenter: parent.horizontalCenter
+                onClicked: startLoading()
+            }
+        }
     }
 }
