@@ -1,16 +1,63 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
-import QtWebView 1.1  // 使用WebView来加载Plotly
+import QtWebEngine 1.8
+import QtWebChannel 1.0
 
 // 避免直接导入QtCharts模块
 Item {
     id: chartView
     
+    // 当ChartView的可见性发生变化时触发
+    onVisibleChanged: {
+        if (visible) {
+            console.log("ChartView: 视图变为可见，设置加载状态并重载WebView。");
+            isLoading = true;       // 进入加载状态
+            hasError = false;
+            errorMessage = "";
+
+            loadingIndicator.visible = true; // 显示加载动画
+            chartContainer.visible = false; // 隐藏旧的/空白的图表
+            emptyView.visible = false;    // 隐藏错误/空状态视图
+            
+            webView.reload(); // 重新加载HTML页面
+        } else {
+            console.log("ChartView: 视图变为隐藏。");
+            // 如果有活动的定时器或操作，可以在这里停止它们
+            loadTimer.stop();
+            // isLoading = false; // 可选：如果需要在隐藏时重置加载状态
+        }
+    }
+    
+    property int reportedHtmlHeight: 600 // Default initial height
+    
     // 基本属性
     property bool isLoading: false
     property bool hasError: false
     property string errorMessage: ""
+    
+    // 公开给JavaScript的函数 
+    function pageLoaded() {
+        console.log("ChartView QML: pageLoaded() 被JS调用，表明WebView和WebChannel已就绪。");
+        // WebView已加载，WebChannel已准备好，现在可以安全地启动数据加载流程
+        // isLoading 应该已经被 onVisibleChanged 设置为 true
+        if (isLoading) { // 确认我们处于加载流程中
+            loadTimer.restart(); // 触发 loadChartData
+        } else {
+            // 这不应该发生，如果发生了，说明 onVisibleChanged->reload->pageLoaded 流程有问题
+            console.warn("ChartView QML: pageLoaded() 被调用，但isLoading为false。可能存在逻辑问题。");
+            // 也可以选择在这里强制启动加载，以防万一
+            // startLoading(); // startLoading会再次设置isLoading等，可能不是最优
+        }
+    }
+    
+    // Function called by JavaScript to set the content height
+    function setHtmlContentHeight(newHeight) {
+        console.log("QML: Received HTML content height:", newHeight);
+        if (reportedHtmlHeight !== newHeight && newHeight > 0) {
+            reportedHtmlHeight = newHeight;
+        }
+    }
     
     // 初始化
     Component.onCompleted: {
@@ -59,27 +106,29 @@ Item {
     // 加载图表数据
     function loadChartData() {
         try {
-            console.log("ChartView: 加载图表数据")
+            console.log("ChartView: 从数据库加载图表数据")
             
-            // 生成样本数据
-            var profitLossData = generateProfitLossData()
-            var assetDistributionData = generateAssetDistributionData()
-            
-            // 将数据转换为JSON字符串
-            var plotlyData = {
-                profitLoss: profitLossData,
-                assetDistribution: assetDistributionData
+            // 获取数据 - 从后端获取实际数据
+            var chartData = {
+                profitLoss: loadProfitLossData(),
+                stockRanking: loadStockRankingData(),
+                monthlyVolume: loadMonthlyVolumeData(),
+                winLossRatio: loadWinLossRatioData()
             }
             
-            // 传递数据给WebView
-            var dataJson = JSON.stringify(plotlyData)
-            var js = "updateCharts(" + dataJson + ");"
-            webView.runJavaScript(js)
+            // 将数据转换为JSON字符串
+            var dataJson = JSON.stringify(chartData)
             
-            // 完成加载
+            // 使用 WebEngine 的 runJavaScript 方法
+            var js = "if (typeof updateCharts === 'function') { updateCharts(" + dataJson + "); console.log('图表更新函数已调用'); } else { console.error('updateCharts 函数未找到'); }";
+            
+            webView.runJavaScript(js, function(result) {
+                console.log("图表更新结果:", result);
+                // 在JavaScript执行完成后显示图表
             chartContainer.visible = true
             isLoading = false
             loadingIndicator.visible = false
+            });
             
         } catch (e) {
             console.error("ChartView: 加载图表数据出错:", e)
@@ -87,20 +136,37 @@ Item {
         }
     }
     
-    // 生成盈亏数据
-    function generateProfitLossData() {
-        var months = ["1月", "2月", "3月", "4月", "5月", "6月"]
+    // 加载盈亏趋势数据 - 从后端获取
+    function loadProfitLossData() {
+        console.log("加载盈亏趋势数据")
+        
+        try {
+            // 获取过去12个月的数据
+            var monthlyData = backend.getMonthlyProfitLossLastYear()
+            
+            // 处理数据
+            var months = []
         var profits = []
         var losses = []
         var netValues = []
         
-        for (var i = 0; i < months.length; i++) {
-            var profit = Math.random() * 1000
-            var loss = Math.random() * 500
-            
-            profits.push(profit)
-            losses.push(loss)
-            netValues.push(profit - loss)
+            for (var i = 0; i < monthlyData.length; i++) {
+                var item = monthlyData[i]
+                // 提取月份信息
+                var yearMonth = item.month.split("-")
+                var monthLabel = yearMonth[0] + "年" + parseInt(yearMonth[1]) + "月"
+                months.push(monthLabel)
+                
+                // 计算盈亏
+                var profitLoss = item.profitLoss
+                if (profitLoss > 0) {
+                    profits.push(profitLoss)
+                    losses.push(0)
+                } else {
+                    profits.push(0)
+                    losses.push(Math.abs(profitLoss))
+                }
+                netValues.push(profitLoss)
         }
         
         return {
@@ -109,26 +175,183 @@ Item {
             losses: losses,
             netValues: netValues
         }
+        } catch (e) {
+            console.error("加载盈亏趋势数据出错:", e)
+            return { months: [], profits: [], losses: [], netValues: [] }
+        }
     }
     
-    // 生成资产分布数据
-    function generateAssetDistributionData() {
-        var assetTypes = ["股票", "基金", "债券", "外汇", "其他"]
-        var percentages = []
-        var totalPercentage = 0
+    // 加载个股盈亏排名数据
+    function loadStockRankingData() {
+        console.log("加载个股盈亏排名数据")
         
-        for (var i = 0; i < assetTypes.length - 1; i++) {
-            var percentage = Math.floor(Math.random() * (100 - totalPercentage) / 2)
-            percentages.push(percentage)
-            totalPercentage += percentage
+        try {
+            // 获取盈利最多的项目（取前5名）
+            var topProfit = backend.getTopProjects(5, true, null, null)
+            
+            // 获取亏损最多的项目（取前3名）
+            var topLoss = backend.getTopProjects(3, false, null, null)
+            
+            var stocks = []
+            var values = []
+            
+            // 添加盈利项目
+            for (var i = 0; i < topProfit.length; i++) {
+                stocks.push(topProfit[i].project_name)
+                values.push(topProfit[i].total_profit_loss)
+            }
+            
+            // 添加亏损项目
+            for (var j = 0; j < topLoss.length; j++) {
+                stocks.push(topLoss[j].project_name)
+                values.push(topLoss[j].total_profit_loss) // 亏损已经是负值
+            }
+            
+            return {
+                stocks: stocks,
+                values: values
+            }
+        } catch (e) {
+            console.error("加载个股盈亏排名数据出错:", e)
+            return { stocks: [], values: [] }
+        }
+    }
+    
+    // 加载月度交易量数据
+    function loadMonthlyVolumeData() {
+        console.log("加载月度交易量数据")
+        
+        try {
+            // 获取过去12个月的数据
+            var today = new Date()
+            var months = []
+            var volumes = []
+            
+            // 获取最近半年的月份
+            for (var i = 5; i >= 0; i--) {
+                var month = today.getMonth() - i
+                var year = today.getFullYear()
+                
+                // 处理月份为负的情况
+                if (month < 0) {
+                    month += 12
+                    year -= 1
+                }
+                
+                // 格式化日期为YYYY-MM-DD
+                var startDate = year + "-" + String(month + 1).padStart(2, '0') + "-01"
+                
+                // 计算月末日期
+                var endMonth = month + 1
+                var endYear = year
+                if (endMonth > 11) {
+                    endMonth = 0
+                    endYear += 1
+                }
+                
+                var lastDay = new Date(endYear, endMonth, 0).getDate()
+                var endDate = year + "-" + String(month + 1).padStart(2, '0') + "-" + String(lastDay).padStart(2, '0')
+                
+                // 获取该月交易数量
+                var transactions = backend.getTransactions(startDate, endDate, "", 999, 0)
+                var monthLabel = year + "年" + (month + 1) + "月"
+                
+                months.push(monthLabel)
+                volumes.push(transactions.length)
+            }
+            
+            return {
+                months: months,
+                volumes: volumes
+            }
+        } catch (e) {
+            console.error("加载月度交易量数据出错:", e)
+            return { months: [], volumes: [] }
+        }
+    }
+    
+    // 加载盈亏比率趋势数据
+    function loadWinLossRatioData() {
+        console.log("加载盈亏比率趋势数据")
+        
+        try {
+            // 获取过去6个月的数据
+            var today = new Date()
+            var months = []
+            var winRates = []
+            var profitLossRatios = []
+            
+            // 获取最近半年的月份
+            for (var i = 5; i >= 0; i--) {
+                var month = today.getMonth() - i
+                var year = today.getFullYear()
+                
+                // 处理月份为负的情况
+                if (month < 0) {
+                    month += 12
+                    year -= 1
+                }
+                
+                // 格式化日期为YYYY-MM-DD
+                var startDate = year + "-" + String(month + 1).padStart(2, '0') + "-01"
+                
+                // 计算月末日期
+                var endMonth = month + 1
+                var endYear = year
+                if (endMonth > 11) {
+                    endMonth = 0
+                    endYear += 1
+                }
+                
+                var lastDay = new Date(endYear, endMonth, 0).getDate()
+                var endDate = year + "-" + String(month + 1).padStart(2, '0') + "-" + String(lastDay).padStart(2, '0')
+                
+                // 获取该月交易数据
+                var transactions = backend.getTransactions(startDate, endDate, "", 999, 0)
+                var monthLabel = year + "年" + (month + 1) + "月"
+                
+                // 计算胜率和盈亏比
+                var winCount = 0
+                var lossCount = 0
+                var totalProfit = 0
+                var totalLoss = 0
+                
+                for (var j = 0; j < transactions.length; j++) {
+                    var profit = transactions[j].profit_loss
+                    if (profit > 0) {
+                        winCount++
+                        totalProfit += profit
+                    } else if (profit < 0) {
+                        lossCount++
+                        totalLoss += Math.abs(profit)
+                    }
+                }
+                
+                // 计算胜率
+                var winRate = 0
+                if (winCount + lossCount > 0) {
+                    winRate = (winCount / (winCount + lossCount)) * 100
         }
         
-        // 最后一项占余下的百分比
-        percentages.push(100 - totalPercentage)
+                // 计算盈亏比
+                var profitLossRatio = 0
+                if (lossCount > 0 && totalLoss > 0 && winCount > 0) {
+                    profitLossRatio = (totalProfit / winCount) / (totalLoss / lossCount)
+                }
+                
+                months.push(monthLabel)
+                winRates.push(parseFloat(winRate.toFixed(1)))
+                profitLossRatios.push(parseFloat(profitLossRatio.toFixed(2)))
+            }
         
         return {
-            types: assetTypes,
-            percentages: percentages
+                months: months,
+                winRates: winRates,
+                profitLossRatios: profitLossRatios
+            }
+        } catch (e) {
+            console.error("加载盈亏比率趋势数据出错:", e)
+            return { months: [], winRates: [], profitLossRatios: [] }
         }
     }
     
@@ -145,42 +368,90 @@ Item {
     }
     
     // 主布局
-    ScrollView {
-        id: chartScrollView
+    Rectangle {
+        id: mainContainer
         anchors.fill: parent
-        contentWidth: availableWidth
+        color: "#f5f5f5"
         
-        ColumnLayout {
-            width: chartScrollView.width
+        Flickable {
+            id: chartFlickable
+            anchors.fill: parent
+            contentWidth: width
+            contentHeight: chartsColumn.height
+            clip: true
+            
+            // 启用滚动条
+            ScrollBar.vertical: ScrollBar {
+                policy: ScrollBar.AlwaysOn
+                width: 12
+                active: true
+            }
+        
+            Column {
+                id: chartsColumn
+                width: chartFlickable.width - 15 // 减去滚动条宽度
             spacing: 20
             
             // 图表容器
-            Item {
+                Rectangle {
                 id: chartContainer
-                Layout.fillWidth: true
-                Layout.preferredHeight: 700
+                    width: parent.width
+                    height: chartView.reportedHtmlHeight // Bind to the reported height
+                    color: "white"
                 visible: !isLoading && !hasError
+                    radius: 4
+                    
+                    // WebChannel设置
+                    WebChannel {
+                        id: webChannel
+                        
+                        // 注册当前QML对象，使JavaScript可以调用
+                        Component.onCompleted: {
+                            webChannel.registerObject("chartView", chartView)
+                        }
+                    }
                 
-                // 使用WebView加载Plotly图表
-                WebView {
+                    // 使用WebEngineView加载Plotly图表
+                    WebEngineView {
                     id: webView
                     anchors.fill: parent
-                    url: "qrc:/html/charts.html"  // 加载包含Plotly的HTML页面
+                        url: Qt.resolvedUrl("../html/charts.html")
+                        webChannel: webChannel
+                        
+                        // 启用WebChannel支持
+                        settings.javascriptEnabled: true
+                        settings.allowRunningInsecureContent: true
+                        settings.localContentCanAccessRemoteUrls: true
                     
                     onLoadingChanged: function(loadRequest) {
-                        if (loadRequest.status === WebView.LoadSucceededStatus) {
-                            console.log("WebView加载成功，准备显示图表")
-                            
-                            // 在加载完成后直接加载数据
-                            if (chartContainer.visible) {
-                                var timer = Qt.createQmlObject('import QtQuick 2.0; Timer { interval: 500; repeat: false; running: true; }', chartView);
-                                timer.triggered.connect(function() {
-                                    loadChartData();
-                                });
-                            }
-                        } else if (loadRequest.status === WebView.LoadFailedStatus) {
-                            console.error("WebView加载失败:", loadRequest.errorString)
-                            setError("加载图表页面失败: " + loadRequest.errorString)
+                        if (loadRequest.status === WebEngineView.LoadSucceededStatus) {
+                            console.log("ChartView WebEngineView: LoadSucceededStatus - HTML页面已加载/重载。");
+                            // JS内部的DOMContentLoaded和WebChannel初始化会调用QML的pageLoaded()
+                        } else if (loadRequest.status === WebEngineView.LoadFailedStatus) {
+                            console.error("ChartView WebEngineView: LoadFailedStatus - 加载 '", loadRequest.url, "' 失败: ", loadRequest.errorString);
+                            setError("加载图表核心页面失败: " + loadRequest.errorString);
+                        }
+                    }
+                        
+                    onJavaScriptConsoleMessage: function(level, message, lineNumber, sourceId) {
+                        var levelStr = "信息"
+                        if (level === WebEngineView.InfoMessageLevel) levelStr = "信息";
+                        else if (level === WebEngineView.WarningMessageLevel) levelStr = "警告";
+                        else if (level === WebEngineView.ErrorMessageLevel) levelStr = "错误";
+                        
+                        console.log("JS控制台 [" + levelStr + "] " + message + " (行: " + lineNumber + ", 源: " + sourceId + ")");
+                    }
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        acceptedButtons: Qt.NoButton // 只处理滚轮，不处理点击，让点击穿透到WebView
+                        onWheel: (wheel) => {
+                            // wheel.angleDelta.y 通常是 120 的倍数
+                            // 正值表示向下滚轮（内容向上滚动），负值表示向上滚轮（内容向下滚动）
+                            let scrollAmount = wheel.angleDelta.y * 0.5; // 滚动灵敏度因子，可以调整
+                            chartFlickable.contentY -= scrollAmount; // 更新Flickable的滚动位置
+                            wheel.accepted = true; // 事件已处理，不再向下传递
                         }
                     }
                 }
@@ -245,7 +516,7 @@ Item {
             }
             
             Text {
-                text: hasError ? errorMessage : "请确保已安装WebView模块，并添加一些交易数据"
+                text: hasError ? errorMessage : "请确保已安装WebEngine模块，并添加一些交易数据"
                 font.pixelSize: 16
                 color: "#7f8c8d"
                 anchors.horizontalCenter: parent.horizontalCenter

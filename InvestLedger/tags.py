@@ -327,7 +327,7 @@ class TagManager:
             cursor = conn.cursor()
             
             cursor.execute("""
-                SELECT t.id, t.name, t.color, t.description 
+                SELECT t.id, t.name, t.color 
                 FROM tags t
                 INNER JOIN transaction_tags tt ON t.id = tt.tag_id
                 WHERE tt.transaction_id = ?

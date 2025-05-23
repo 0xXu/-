@@ -5,13 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>InvestLedger Charts</title>
     <!-- 加载Plotly.js库 (从CDN) -->
-    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+    <!-- 加载Qt WebChannel的脚本 -->
+    <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
     <style>
         body {
             font-family: Arial, sans-serif;
             margin: 0;
             padding: 0;
             background-color: #f5f5f5;
+            overflow-y: hidden; /* 禁止body的垂直滚动条 */
         }
         .chart-container {
             background-color: white;
@@ -27,27 +30,94 @@
             padding-bottom: 10px;
             border-bottom: 1px solid #eee;
         }
-        #profit-loss-chart, #asset-distribution-chart {
+        .chart {
             width: 100%;
-            height: 300px;
+            height: 280px;
         }
     </style>
 </head>
 <body>
     <div class="chart-container">
         <h2>盈亏趋势</h2>
-        <div id="profit-loss-chart"></div>
+        <div id="profit-loss-chart" class="chart"></div>
     </div>
     
     <div class="chart-container">
-        <h2>资产分布</h2>
-        <div id="asset-distribution-chart"></div>
+        <h2>个股盈亏排名</h2>
+        <div id="stock-ranking-chart" class="chart"></div>
+    </div>
+    
+    <div class="chart-container">
+        <h2>月度交易量分析</h2>
+        <div id="monthly-volume-chart" class="chart"></div>
+    </div>
+    
+    <div class="chart-container">
+        <h2>盈亏比率趋势</h2>
+        <div id="win-loss-ratio-chart" class="chart"></div>
     </div>
     
     <script>
+        // 全局变量以保存chartView对象引用
+        var chartView = null;
+
+        // Function to report content height to QML
+        function reportContentHeight() {
+            if (chartView && typeof chartView.setHtmlContentHeight === 'function') {
+                var height = document.body.scrollHeight;
+                console.log("JS: Reporting HTML content height to QML:", height);
+                chartView.setHtmlContentHeight(height);
+            } else {
+                // console.log("JS: chartView or setHtmlContentHeight not ready for reporting height.");
+            }
+        }
+
+        // 初始化WebChannel
+        function initWebChannel() {
+            if (typeof QWebChannel !== 'undefined') {
+                new QWebChannel(qt.webChannelTransport, function(channel) {
+                    chartView = channel.objects.chartView; // Assign to global
+                    console.log("WebChannel初始化成功", chartView ? "chartView已获取" : "chartView未获取");
+                    
+                    if (chartView && typeof chartView.pageLoaded === 'function') {
+                        chartView.pageLoaded();
+                    }
+                    // Initial height report
+                    reportContentHeight();
+                });
+            } else {
+                console.error("QWebChannel未定义，可能未正确加载qwebchannel.js");
+            }
+        }
+
         // 初始化空图表
         document.addEventListener('DOMContentLoaded', function() {
-            // 创建空的盈亏趋势图
+            // 初始化所有图表为空
+            initEmptyCharts();
+            
+            // 检查URL参数中是否包含数据
+            checkUrlForData(); // This might call updateCharts
+            
+            // 初始化WebChannel
+            initWebChannel(); // Sets up chartView and does an initial reportContentHeight
+
+            // Setup ResizeObserver
+            if (typeof ResizeObserver !== 'undefined') {
+                const ro = new ResizeObserver(entries => {
+                    reportContentHeight(); 
+                });
+                ro.observe(document.body);
+                console.log("JS: ResizeObserver attached to document.body");
+            } else {
+                // Fallback: report on window resize if ResizeObserver is not available
+                window.addEventListener('resize', reportContentHeight);
+                console.log("JS: ResizeObserver not available, using window.resize fallback for height reporting.");
+            }
+        });
+        
+        // 初始化所有空图表
+        function initEmptyCharts() {
+            // 盈亏趋势图
             var profitLossLayout = {
                 title: '',
                 barmode: 'group',
@@ -57,43 +127,103 @@
                 plot_bgcolor: '#fff',
                 paper_bgcolor: '#fff'
             };
-            
             Plotly.newPlot('profit-loss-chart', [], profitLossLayout);
             
-            // 创建空的资产分布图
-            var distributionLayout = {
+            // 个股盈亏排名图
+            var stockRankingLayout = {
                 title: '',
-                margin: {l: 20, r: 20, t: 30, b: 20},
-                legend: {orientation: 'v'},
+                yaxis: {title: '盈亏金额'},
+                margin: {l: 60, r: 30, t: 30, b: 80},
                 plot_bgcolor: '#fff',
                 paper_bgcolor: '#fff'
             };
+            Plotly.newPlot('stock-ranking-chart', [], stockRankingLayout);
             
-            Plotly.newPlot('asset-distribution-chart', [], distributionLayout);
+            // 月度交易量图
+            var volumeLayout = {
+                title: '',
+                yaxis: {title: '交易量'},
+                xaxis: {title: '月份'},
+                margin: {l: 50, r: 30, t: 30, b: 50},
+                plot_bgcolor: '#fff',
+                paper_bgcolor: '#fff'
+            };
+            Plotly.newPlot('monthly-volume-chart', [], volumeLayout);
             
-            // 通知QML页面已加载完成
-            if (typeof qt !== 'undefined') {
-                // 如果在Qt WebView环境中运行，发送消息
-                qt.WebChannel.objects.chartView.pageLoaded();
-            } else {
-                console.log("页面在非Qt环境中加载");
+            // 盈亏比率趋势图
+            var ratioLayout = {
+                title: '',
+                yaxis: {title: '比率 (%)'},
+                xaxis: {title: '月份'},
+                margin: {l: 50, r: 30, t: 30, b: 50},
+                plot_bgcolor: '#fff',
+                paper_bgcolor: '#fff'
+            };
+            Plotly.newPlot('win-loss-ratio-chart', [], ratioLayout);
+        }
+        
+        // 检查URL参数中是否包含图表数据
+        function checkUrlForData() {
+            try {
+                const urlParams = new URLSearchParams(window.location.search);
+                const dataParam = urlParams.get('data');
+                
+                if (dataParam) {
+                    console.log("从URL参数中检测到数据");
+                    const data = JSON.parse(decodeURIComponent(dataParam));
+                    updateCharts(data); // This will now be async and report height
+                }
+            } catch (e) {
+                console.error("解析URL数据参数失败:", e);
             }
-        });
+        }
         
         // 更新图表函数，由QML调用
-        function updateCharts(data) {
-            console.log("接收到更新图表数据");
+        async function updateCharts(data) { // Make async
+            console.log("接收到更新图表数据", data);
             
             try {
+                // 确保我们有有效的数据对象
+                if (!data) {
+                    console.error("接收到的数据格式无效:", data);
+                    reportContentHeight(); // Report height even if data is invalid (e.g. for empty state)
+                    return false;
+                }
+                
+                const promises = [];
                 // 更新盈亏趋势图
-                updateProfitLossChart(data.profitLoss);
+                if (data.profitLoss) {
+                    promises.push(updateProfitLossChart(data.profitLoss));
+                }
                 
-                // 更新资产分布图
-                updateAssetDistributionChart(data.assetDistribution);
+                // 更新个股盈亏排名图
+                if (data.stockRanking) {
+                    promises.push(updateStockRankingChart(data.stockRanking));
+                }
                 
+                // 更新月度交易量图
+                if (data.monthlyVolume) {
+                    promises.push(updateMonthlyVolumeChart(data.monthlyVolume));
+                }
+                
+                // 更新盈亏比率趋势图
+                if (data.winLossRatio) {
+                    promises.push(updateWinLossRatioChart(data.winLossRatio));
+                }
+
+                if (promises.length > 0) {
+                    await Promise.all(promises);
+                    console.log("JS: All charts updated via Plotly.react promises.");
+                } else {
+                    console.log("JS: No chart data provided to update.");
+                }
+                
+                reportContentHeight(); // Report height after all are done
+
                 return true;
             } catch (e) {
                 console.error("更新图表时出错:", e);
+                reportContentHeight(); // Also report height on error
                 return false;
             }
         }
@@ -148,58 +278,143 @@
                 paper_bgcolor: '#fff'
             };
             
-            Plotly.react('profit-loss-chart', [profitTrace, lossTrace, netTrace], layout);
+            return Plotly.react('profit-loss-chart', [profitTrace, lossTrace, netTrace], layout); // Return promise
         }
         
-        // 更新资产分布图
-        function updateAssetDistributionChart(data) {
-            // 设置饼图数据
+        // 更新个股盈亏排名图
+        function updateStockRankingChart(data) {
+            var colors = data.values.map(function(value) {
+                return value >= 0 ? '#2ecc71' : '#e74c3c';
+            });
+            
             var trace = {
-                labels: data.types,
-                values: data.percentages,
-                type: 'pie',
-                hole: 0.4,
-                textinfo: 'label+percent',
-                textposition: 'outside',
-                automargin: true,
+                x: data.stocks,
+                y: data.values,
+                type: 'bar',
                 marker: {
-                    colors: ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6']
+                    color: colors
                 }
             };
             
             var layout = {
                 title: '',
-                showlegend: true,
-                legend: {orientation: 'v'},
-                margin: {l: 20, r: 20, t: 30, b: 20},
+                yaxis: {title: '盈亏金额'},
+                margin: {l: 60, r: 30, t: 30, b: 100},
+                plot_bgcolor: '#fff',
+                paper_bgcolor: '#fff',
+                xaxis: {
+                    tickangle: -45
+                }
+            };
+            
+            return Plotly.react('stock-ranking-chart', [trace], layout); // Return promise
+        }
+        
+        // 更新月度交易量图
+        function updateMonthlyVolumeChart(data) {
+            var trace = {
+                x: data.months,
+                y: data.volumes,
+                type: 'bar',
+                marker: {
+                    color: '#3498db'
+                }
+            };
+            
+            var layout = {
+                title: '',
+                yaxis: {title: '交易量'},
+                xaxis: {title: '月份'},
+                margin: {l: 50, r: 30, t: 30, b: 50},
                 plot_bgcolor: '#fff',
                 paper_bgcolor: '#fff'
             };
             
-            Plotly.react('asset-distribution-chart', [trace], layout);
+            return Plotly.react('monthly-volume-chart', [trace], layout); // Return promise
+        }
+        
+        // 更新盈亏比率趋势图
+        function updateWinLossRatioChart(data) {
+            var winRateTrace = {
+                x: data.months,
+                y: data.winRates,
+                name: '胜率',
+                type: 'scatter',
+                mode: 'lines+markers',
+                line: {
+                    color: '#2ecc71',
+                    width: 3
+                },
+                marker: {
+                    size: 8
+                }
+            };
+            
+            var profitLossRatioTrace = {
+                x: data.months,
+                y: data.profitLossRatios,
+                name: '盈亏比',
+                type: 'scatter',
+                mode: 'lines+markers',
+                line: {
+                    color: '#3498db',
+                    width: 3
+                },
+                marker: {
+                    size: 8
+                },
+                yaxis: 'y2'
+            };
+            
+            var layout = {
+                title: '',
+                yaxis: {
+                    title: '胜率 (%)',
+                    rangemode: 'tozero'
+                },
+                yaxis2: {
+                    title: '盈亏比',
+                    overlaying: 'y',
+                    side: 'right',
+                    rangemode: 'tozero'
+                },
+                xaxis: {title: '月份'},
+                legend: {orientation: 'h', y: -0.2},
+                margin: {l: 50, r: 50, t: 30, b: 80},
+                plot_bgcolor: '#fff',
+                paper_bgcolor: '#fff'
+            };
+            
+            return Plotly.react('win-loss-ratio-chart', [winRateTrace, profitLossRatioTrace], layout); // Return promise
         }
         
         // 用于测试的函数
         function testCharts() {
-            // 测试盈亏数据
-            var testProfitLoss = {
+            // 测试数据
+            var testData = {
+                profitLoss: {
                 months: ["1月", "2月", "3月", "4月", "5月", "6月"],
                 profits: [500, 700, 600, 800, 900, 1000],
                 losses: [200, 300, 250, 400, 350, 300],
                 netValues: [300, 400, 350, 400, 550, 700]
-            };
-            
-            // 测试资产分布数据
-            var testDistribution = {
-                types: ["股票", "基金", "债券", "外汇", "其他"],
-                percentages: [30, 25, 20, 15, 10]
+                },
+                stockRanking: {
+                    stocks: ["阿里巴巴", "腾讯控股", "贵州茅台", "中国平安", "招商银行", "格力电器", "美的集团", "万科A"],
+                    values: [1200, 900, 800, 500, -300, -400, -600, -700]
+                },
+                monthlyVolume: {
+                    months: ["1月", "2月", "3月", "4月", "5月", "6月"],
+                    volumes: [15, 22, 18, 25, 30, 28]
+                },
+                winLossRatio: {
+                    months: ["1月", "2月", "3月", "4月", "5月", "6月"],
+                    winRates: [60, 65, 62, 70, 72, 75],
+                    profitLossRatios: [1.5, 1.8, 1.6, 2.0, 2.2, 2.3]
+                }
             };
             
             // 测试更新图表
-            updateCharts({
-                profitLoss: testProfitLoss,
-                assetDistribution: testDistribution
-            });
+            updateCharts(testData);
         }
         
         // 如果在浏览器环境中，自动运行测试数据

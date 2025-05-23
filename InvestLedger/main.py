@@ -31,15 +31,14 @@ try:
 except ImportError:
     has_effects = False
     
-# 尝试导入WebView模块
+# 尝试导入 WebEngine 模块
 try:
-    from PySide6 import QtWebView
-    QtWebView.initialize()
+    from PySide6.QtWebEngineWidgets import QWebEngineView
     has_webview = True
-    logging.info("Qt WebView 模块加载成功")
+    logging.info("Qt WebEngine 模块加载成功")
 except ImportError:
     has_webview = False
-    logging.warning("无法加载 Qt WebView 模块，图表功能将被禁用")
+    logging.warning("无法加载 Qt WebEngine 模块，图表功能将被禁用")
 
 # 版本信息
 __version__ = "0.1.0"
