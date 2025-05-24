@@ -1065,6 +1065,11 @@ Item {
             // 使用计时器延迟加载数据，而不是使用setTimeout
             delayedReloadTimer.start();
         }
+        
+        function onDashboardUpdateNeeded() {
+            console.log("Dashboard update needed, reloading dashboard...");
+            delayedReloadTimer.start();
+        }
     }
     
     // 延迟加载计时器

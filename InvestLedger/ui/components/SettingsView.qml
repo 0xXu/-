@@ -351,6 +351,55 @@ Item {
         }
     }
 
+    // 添加Toast提示组件
+    component Toast: Rectangle {
+        id: toastRoot
+        property string message: ""
+        property int displayTime: 2000 // 显示2秒
+        property bool showing: false
+        
+        width: toastMessage.implicitWidth + 40
+        height: 40
+        radius: 20
+        color: Qt.rgba(0, 0, 0, 0.7)
+        opacity: showing ? 1.0 : 0.0
+        visible: opacity > 0
+        
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: showing ? 40 : -50
+        
+        Behavior on opacity {
+            NumberAnimation { duration: 300; easing.type: Easing.OutQuad }
+        }
+        
+        Behavior on anchors.bottomMargin {
+            NumberAnimation { duration: 300; easing.type: Easing.OutQuad }
+        }
+        
+        Text {
+            id: toastMessage
+            anchors.centerIn: parent
+            text: toastRoot.message
+            color: "white"
+            font.pixelSize: 14
+        }
+        
+        Timer {
+            id: hideTimer
+            interval: toastRoot.displayTime
+            onTriggered: {
+                toastRoot.showing = false;
+            }
+        }
+        
+        function show(msg) {
+            message = msg;
+            showing = true;
+            hideTimer.restart();
+        }
+    }
+
     // 保存设置
     function saveSettings() {
         // 这里在实际应用中应该保存设置到配置文件
@@ -360,8 +409,14 @@ Item {
 
         // 设置备份天数
         backend.cleanupBackups(backupDays);
+        
+        // 同步设置到仪表盘
+        if (backend) {
+            backend.refreshDashboard();
+        }
 
-        saveSuccessDialog.open();
+        // 显示Toast提示
+        settingsToast.show("设置已保存");
     }
 
     // 备份数据库
@@ -1435,6 +1490,77 @@ Item {
                         Layout.bottomMargin: 5
                     }
 
+                    // 目标设置模式选择器
+                    Text {
+                        text: "目标设置模式:"
+                        font.pixelSize: labelFontSize
+                        color: theme ? theme.textColor : "black"
+                    }
+                    
+                    // 标签页切换控件
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 40
+                        radius: 20
+                        color: theme ? (theme.isDarkTheme ? Qt.rgba(0.2, 0.2, 0.25, 0.7) : Qt.rgba(0.9, 0.9, 0.9, 1.0)) : "#f0f0f0"
+                        
+                        Row {
+                            anchors.fill: parent
+                            anchors.margins: 3
+                            spacing: 0
+                            
+                            // 常规模式按钮
+                            Rectangle {
+                                width: parent.width / 2
+                                height: parent.height - 6
+                                radius: height / 2
+                                color: !goalSettingsLayout.isCompoundMode ? theme.primaryColor : "transparent"
+                                
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "常规模式"
+                                    font.pixelSize: 14
+                                    color: !goalSettingsLayout.isCompoundMode ? "white" : theme.textColor
+                                }
+                                
+                                MouseArea {
+                                    anchors.fill: parent
+                                    onClicked: {
+                                        goalSettingsLayout.isCompoundMode = false;
+                                    }
+                                }
+                            }
+                            
+                            // 复利模式按钮
+                            Rectangle {
+                                width: parent.width / 2
+                                height: parent.height - 6
+                                radius: height / 2
+                                color: goalSettingsLayout.isCompoundMode ? theme.primaryColor : "transparent"
+                                
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "复利模式"
+                                    font.pixelSize: 14
+                                    color: goalSettingsLayout.isCompoundMode ? "white" : theme.textColor
+                                }
+                                
+                                MouseArea {
+                                    anchors.fill: parent
+                                    onClicked: {
+                                        goalSettingsLayout.isCompoundMode = true;
+                                        // 计算复利目标
+                                        recalculateMonthlyCompoundGoal();
+                                        recalculateAnnualCompoundGoal();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    // 添加属性跟踪当前模式
+                    property bool isCompoundMode: false
+                    
                     // 月度目标设置卡片 - 使用更现代的设计
                     Rectangle {
                         Layout.fillWidth: true
@@ -1462,7 +1588,7 @@ Item {
                                     radius: width/2
                                     color: theme ? Qt.alpha(theme.primaryColor, 0.7) : "#4CAF50"
                                 
-                                Text {
+                                    Text {
                                         anchors.centerIn: parent
                                         text: "📅"
                                         font.pixelSize: 14
@@ -1518,7 +1644,7 @@ Item {
                                 }
                             }
                             
-                            // 内容区
+                            // 常规模式内容 - 条件显示
                             GridLayout {
                                 Layout.fillWidth: true
                                 columns: 2
@@ -1526,6 +1652,7 @@ Item {
                                 columnSpacing: 15
                                 enabled: monthlyGoalSwitch.checked
                                 opacity: monthlyGoalSwitch.checked ? 1.0 : 0.5
+                                visible: !goalSettingsLayout.isCompoundMode // 只在常规模式下显示
                                 
                                 Behavior on opacity {
                                     NumberAnimation { duration: 150 }
@@ -1541,34 +1668,34 @@ Item {
                                 RowLayout {
                                     spacing: 10
                                 
-                                Rectangle {
-                                    Layout.preferredWidth: 180
-                                    Layout.minimumWidth: 120
-                                    height: inputHeight
+                                    Rectangle {
+                                        Layout.preferredWidth: 180
+                                        Layout.minimumWidth: 120
+                                        height: inputHeight
                                         radius: inputRadius
-                                    color: inputBgColor
-                                    border.color: inputBorderColor
-                                    border.width: 1
-                                    
-                                    RowLayout {
-                                        anchors.fill: parent
+                                        color: inputBgColor
+                                        border.color: inputBorderColor
+                                        border.width: 1
+                                        
+                                        RowLayout {
+                                            anchors.fill: parent
                                             anchors.leftMargin: 8
                                             anchors.rightMargin: 8
-                                        spacing: 0
-                                        
-                                        Text {
+                                            spacing: 0
+                                            
+                                            Text {
                                                 text: "¥"
                                                 color: inputTextColor
                                                 font.pixelSize: inputFontSize
-                                        }
-                                        
-                                        TextInput {
+                                            }
+                                            
+                                            TextInput {
                                                 id: monthlyGoalInput
-                                            Layout.fillWidth: true
+                                                Layout.fillWidth: true
                                                 horizontalAlignment: TextInput.AlignRight
-                                            color: inputTextColor
+                                                color: inputTextColor
                                                 font.pixelSize: inputFontSize
-                                            selectByMouse: true
+                                                selectByMouse: true
                                                 validator: DoubleValidator {
                                                     bottom: 0.0
                                                     notation: DoubleValidator.StandardNotation
@@ -1589,7 +1716,7 @@ Item {
                                     CustomButton {
                                         text: "重置"
                                         implicitWidth: 70
-                                                onClicked: {
+                                        onClicked: {
                                             if (backend) {
                                                 backend.resetMonthlyGoal();
                                                 monthlyGoalInput.text = "0.00";
@@ -1597,80 +1724,234 @@ Item {
                                         }
                                     }
                                 }
+                            }
+                            
+                            // 复利模式内容 - 条件显示
+                            GridLayout {
+                                Layout.fillWidth: true
+                                columns: 2
+                                rowSpacing: 15
+                                columnSpacing: 15
+                                enabled: monthlyGoalSwitch.checked
+                                opacity: monthlyGoalSwitch.checked ? 1.0 : 0.5
+                                visible: goalSettingsLayout.isCompoundMode // 只在复利模式下显示
                                 
-                                // 当前进度
+                                Behavior on opacity {
+                                    NumberAnimation { duration: 150 }
+                                }
+                                
+                                // 初始投资金额
                                 Text {
-                                    text: "当前进度:"
+                                    text: "初始投资:"
                                     font.pixelSize: labelFontSize
                                     color: theme ? theme.textColor : "black"
                                 }
                                 
-                                ColumnLayout {
-                                    Layout.fillWidth: true
-                                    spacing: 8
+                                Rectangle {
+                                    Layout.preferredWidth: 180
+                                    height: inputHeight
+                                    radius: inputRadius
+                                    color: inputBgColor
+                                    border.color: inputBorderColor
+                                    border.width: 1
                                     
-                                    // 进度文字
                                     RowLayout {
-                                        Layout.fillWidth: true
-                                        spacing: 5
-
-                                Text {
-                                            id: currentMonthProfitText
-                                            text: "¥" + ((backend ? backend.getCurrentMonthProfit() : 0) || 0).toFixed(2)
-                                            font.pixelSize: labelFontSize
-                                            font.bold: true
-                                            color: (currentMonthProfitText.text.indexOf("-") === -1) ? profitColor : lossColor
+                                        anchors.fill: parent
+                                        anchors.leftMargin: 8
+                                        anchors.rightMargin: 8
+                                        spacing: 0
+                                        
+                                        Text {
+                                            text: "¥"
+                                            color: inputTextColor
+                                            font.pixelSize: inputFontSize
                                         }
                                         
+                                        TextInput {
+                                            id: initialInvestmentInput
+                                            Layout.fillWidth: true
+                                            horizontalAlignment: TextInput.AlignRight
+                                            color: inputTextColor
+                                            font.pixelSize: inputFontSize
+                                            selectByMouse: true
+                                            validator: DoubleValidator {
+                                                bottom: 0.0
+                                                notation: DoubleValidator.StandardNotation
+                                                decimals: 2
+                                            }
+                                            text: "10000.00"
+                                            
+                                            onEditingFinished: {
+                                                recalculateMonthlyCompoundGoal();
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                // 月度收益率
                                 Text {
-                                            text: " / ¥" + monthlyGoalInput.text
+                                    text: "月收益率:"
                                     font.pixelSize: labelFontSize
                                     color: theme ? theme.textColor : "black"
                                 }
                                 
-                                        Item { Layout.fillWidth: true }
+                                RowLayout {
+                                    spacing: 5
+                                    
+                                    CustomSpinBox {
+                                        id: monthlyRateSpinBox
+                                        from: 1
+                                        to: 100
+                                        value: 10
+                                        Layout.preferredWidth: 100
+                                        textFromValue: function(value) { return value.toString() }
+                                        valueFromText: function(text) { return parseInt(text) }
                                         
-                                        Text {
-                                            text: currentMonthProgressText.text + "%"
-                                            font.pixelSize: labelFontSize
-                                            font.bold: true
-                                            color: (currentMonthProfitText.text.indexOf("-") === -1) ? profitColor : lossColor
-                                        }
-                                        
-                                        Text {
-                                            id: currentMonthProgressText
-                                            visible: false // 仅用于计算
-                                            text: {
-                                                try {
-                                                    const profit = parseFloat(currentMonthProfitText.text.replace("¥", ""));
-                                                    const goal = parseFloat(monthlyGoalInput.text);
-                                                    if (goal <= 0) return "0";
-                                                    return Math.min(100, Math.max(0, profit / goal * 100)).toFixed(0);
-                                                } catch (e) {
-                                                    return "0";
-                                                }
-                                            }
+                                        onSpinValueChanged: {
+                                            recalculateMonthlyCompoundGoal();
                                         }
                                     }
                                     
-                                    // 进度条
-                                    Rectangle {
-                                        Layout.fillWidth: true
-                                        height: 8
-                                        radius: 4
-                                        color: theme ? (theme.isDarkTheme ? Qt.rgba(0.2, 0.2, 0.25, 0.7) : Qt.rgba(0.9, 0.9, 0.9, 1.0)) : "#f0f0f0"
+                                    Text {
+                                        text: "%"
+                                        color: theme ? theme.textColor : "black"
+                                        font.pixelSize: inputFontSize
+                                    }
+                                }
+                                
+                                // 计算出的目标
+                                Text {
+                                    text: "计算目标:"
+                                    font.pixelSize: labelFontSize
+                                    color: theme ? theme.textColor : "black"
+                                }
+                                
+                                RowLayout {
+                                    spacing: 10
+                                    
+                                    Text {
+                                        id: calculatedGoalText
+                                        text: "¥1000.00"
+                                        font.bold: true
+                                        color: profitColor
+                                        font.pixelSize: inputFontSize
+                                    }
+                                    
+                                    CustomButton {
+                                        text: "应用"
+                                        implicitWidth: 70
+                                        implicitHeight: inputHeight
+                                        highlighted: true
                                         
-                                        Rectangle {
-                                            width: Math.max(0, Math.min(parent.width, parent.width * parseInt(currentMonthProgressText.text) / 100))
-                                            height: parent.height
-                                            radius: 4
-                                            color: (currentMonthProfitText.text.indexOf("-") === -1) ? profitColor : lossColor
-                                            
-                                            Behavior on width {
-                                                NumberAnimation { duration: 600; easing.type: Easing.OutCubic }
+                                        onClicked: {
+                                            var goalValue = parseFloat(calculatedGoalText.text.replace("¥", ""));
+                                            monthlyGoalInput.text = goalValue.toFixed(2);
+                                            if (backend) {
+                                                backend.setMonthlyGoal(goalValue);
                                             }
                                         }
                                     }
+                                }
+                                
+                                // 说明文本 - 跨两列
+                                Text {
+                                    Layout.columnSpan: 2
+                                    Layout.fillWidth: true
+                                    text: "复利模式下,根据您的初始投资和期望月收益率计算目标金额。"
+                                    font.pixelSize: 12
+                                    color: Qt.darker(textColor, 1.2)
+                                    wrapMode: Text.WordWrap
+                                }
+                            }
+                            
+                            // 当前进度 - 常规显示，不管是什么模式都显示
+                            Text {
+                                text: "当前进度:"
+                                font.pixelSize: labelFontSize
+                                color: theme ? theme.textColor : "black"
+                                visible: monthlyGoalSwitch.checked
+                            }
+                            
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 8
+                                visible: monthlyGoalSwitch.checked
+                                
+                                // 进度文字
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 5
+
+                                    Text {
+                                        id: currentMonthProfitText
+                                        text: "¥" + ((backend ? backend.getCurrentMonthProfit() : 0) || 0).toFixed(2)
+                                        font.pixelSize: labelFontSize
+                                        font.bold: true
+                                        color: (currentMonthProfitText.text.indexOf("-") === -1) ? profitColor : lossColor
+                                    }
+                                    
+                                    Text {
+                                        text: " / ¥" + monthlyGoalInput.text
+                                        font.pixelSize: labelFontSize
+                                        color: theme ? theme.textColor : "black"
+                                    }
+                            
+                                    Item { Layout.fillWidth: true }
+                                    
+                                    Text {
+                                        text: currentMonthProgressText.text + "%"
+                                        font.pixelSize: labelFontSize
+                                        font.bold: true
+                                        color: (currentMonthProfitText.text.indexOf("-") === -1) ? profitColor : lossColor
+                                    }
+                                    
+                                    Text {
+                                        id: currentMonthProgressText
+                                        visible: false // 仅用于计算
+                                        text: {
+                                            try {
+                                                const profit = parseFloat(currentMonthProfitText.text.replace("¥", ""));
+                                                const goal = parseFloat(monthlyGoalInput.text);
+                                                if (goal <= 0) return "0";
+                                                return Math.min(100, Math.max(0, profit / goal * 100)).toFixed(0);
+                                            } catch (e) {
+                                                return "0";
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                // 进度条
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    height: 8
+                                    radius: 4
+                                    color: theme ? (theme.isDarkTheme ? Qt.rgba(0.2, 0.2, 0.25, 0.7) : Qt.rgba(0.9, 0.9, 0.9, 1.0)) : "#f0f0f0"
+                                    
+                                    Rectangle {
+                                        width: Math.max(0, Math.min(parent.width, parent.width * parseInt(currentMonthProgressText.text) / 100))
+                                        height: parent.height
+                                        radius: 4
+                                        color: (currentMonthProfitText.text.indexOf("-") === -1) ? profitColor : lossColor
+                                        
+                                        Behavior on width {
+                                            NumberAnimation { duration: 600; easing.type: Easing.OutCubic }
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // 删除旧控件的标记，保持功能函数
+                            function recalculateMonthlyCompoundGoal() {
+                                try {
+                                    var initialInvestment = parseFloat(initialInvestmentInput.text) || 10000.0;
+                                    var monthlyRate = monthlyRateSpinBox.value / 100.0;
+                                    
+                                    // 计算月度目标 = 初始投资 * 月收益率
+                                    var calculatedGoal = initialInvestment * monthlyRate;
+                                    calculatedGoalText.text = "¥" + calculatedGoal.toFixed(2);
+                                } catch (e) {
+                                    console.error("计算复利目标失败: " + e);
                                 }
                             }
                         }
@@ -1678,7 +1959,7 @@ Item {
                     
                     // 年度目标设置卡片 - 使用相同风格
                     Rectangle {
-                                            Layout.fillWidth: true
+                        Layout.fillWidth: true
                         implicitHeight: yearlyGoalContent.implicitHeight + 30
                         color: theme ? (theme.isDarkTheme ? Qt.rgba(0.2, 0.2, 0.25, 0.3) : Qt.rgba(0.97, 0.97, 1.0, 0.7)) : "#f5f5f5"
                         radius: 8
@@ -1707,14 +1988,14 @@ Item {
                                         anchors.centerIn: parent
                                         text: "📊"
                                         font.pixelSize: 14
-                                            }
-                                        }
+                                    }
+                                }
                                         
-                                        Text {
+                                Text {
                                     text: "年度目标"
                                     font.pixelSize: 15
                                     font.bold: true
-                                            color: theme ? theme.textColor : "black"
+                                    color: theme ? theme.textColor : "black"
                                 }
                                 
                                 Rectangle {
@@ -1744,22 +2025,22 @@ Item {
                                         }
                                     }
                                             
-                                            MouseArea {
+                                    MouseArea {
                                         id: yearlyGoalSwitch
-                                                anchors.fill: parent
+                                        anchors.fill: parent
                                         property bool checked: true
-                                                onClicked: {
+                                        onClicked: {
                                             checked = !checked;
                                             // TODO: Connect to backend
                                             if (backend) {
                                                 backend.enableAnnualGoal(checked);
-                                                }
                                             }
                                         }
                                     }
                                 }
+                            }
                                 
-                            // 内容区
+                            // 常规模式内容 - 条件显示
                             GridLayout {
                                 Layout.fillWidth: true
                                 columns: 2
@@ -1767,6 +2048,7 @@ Item {
                                 columnSpacing: 15
                                 enabled: yearlyGoalSwitch.checked
                                 opacity: yearlyGoalSwitch.checked ? 1.0 : 0.5
+                                visible: !goalSettingsLayout.isCompoundMode // 只在常规模式下显示
                                 
                                 Behavior on opacity {
                                     NumberAnimation { duration: 150 }
@@ -1782,22 +2064,22 @@ Item {
                                 RowLayout {
                                     spacing: 10
                                     
-                            Rectangle {
+                                    Rectangle {
                                         Layout.preferredWidth: 180
                                         Layout.minimumWidth: 120
                                         height: inputHeight
                                         radius: inputRadius
                                         color: inputBgColor
                                         border.color: inputBorderColor
-                                border.width: 1
+                                        border.width: 1
                                 
-                                RowLayout {
-                                    anchors.fill: parent
+                                        RowLayout {
+                                            anchors.fill: parent
                                             anchors.leftMargin: 8
                                             anchors.rightMargin: 8
                                             spacing: 0
                                     
-                                    Text {
+                                            Text {
                                                 text: "¥"
                                                 color: inputTextColor
                                                 font.pixelSize: inputFontSize
@@ -1805,7 +2087,7 @@ Item {
                                             
                                             TextInput {
                                                 id: yearlyGoalInput
-                                        Layout.fillWidth: true
+                                                Layout.fillWidth: true
                                                 horizontalAlignment: TextInput.AlignRight
                                                 color: inputTextColor
                                                 font.pixelSize: inputFontSize
@@ -1838,80 +2120,234 @@ Item {
                                         }
                                     }
                                 }
+                            }
+                            
+                            // 复利模式内容 - 条件显示
+                            GridLayout {
+                                Layout.fillWidth: true
+                                columns: 2
+                                rowSpacing: 15
+                                columnSpacing: 15
+                                enabled: yearlyGoalSwitch.checked
+                                opacity: yearlyGoalSwitch.checked ? 1.0 : 0.5
+                                visible: goalSettingsLayout.isCompoundMode // 只在复利模式下显示
                                 
-                                // 当前进度
+                                Behavior on opacity {
+                                    NumberAnimation { duration: 150 }
+                                }
+                                
+                                // 初始投资金额
                                 Text {
-                                    text: "当前进度:"
+                                    text: "初始投资:"
                                     font.pixelSize: labelFontSize
                                     color: theme ? theme.textColor : "black"
                                 }
                                 
-                                ColumnLayout {
+                                Rectangle {
+                                    Layout.preferredWidth: 180
+                                    height: inputHeight
+                                    radius: inputRadius
+                                    color: inputBgColor
+                                    border.color: inputBorderColor
+                                    border.width: 1
+                                    
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        anchors.leftMargin: 8
+                                        anchors.rightMargin: 8
+                                        spacing: 0
+                                        
+                                        Text {
+                                            text: "¥"
+                                            color: inputTextColor
+                                            font.pixelSize: inputFontSize
+                                        }
+                                        
+                                        TextInput {
+                                            id: yearlyInitialInvestmentInput
+                                            Layout.fillWidth: true
+                                            horizontalAlignment: TextInput.AlignRight
+                                            color: inputTextColor
+                                            font.pixelSize: inputFontSize
+                                            selectByMouse: true
+                                            validator: DoubleValidator {
+                                                bottom: 0.0
+                                                notation: DoubleValidator.StandardNotation
+                                                decimals: 2
+                                            }
+                                            text: "10000.00"
+                                            
+                                            onEditingFinished: {
+                                                recalculateAnnualCompoundGoal();
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                // 年收益率
+                                Text {
+                                    text: "年收益率:"
+                                    font.pixelSize: labelFontSize
+                                    color: theme ? theme.textColor : "black"
+                                }
+                                
+                                RowLayout {
+                                    spacing: 5
+                                    
+                                    CustomSpinBox {
+                                        id: yearlyRateSpinBox
+                                        from: 1
+                                        to: 100
+                                        value: 20
+                                        Layout.preferredWidth: 100
+                                        textFromValue: function(value) { return value.toString() }
+                                        valueFromText: function(text) { return parseInt(text) }
+                                        
+                                        onSpinValueChanged: {
+                                            recalculateAnnualCompoundGoal();
+                                        }
+                                    }
+                                    
+                                    Text {
+                                        text: "%"
+                                        color: theme ? theme.textColor : "black"
+                                        font.pixelSize: inputFontSize
+                                    }
+                                }
+                                
+                                // 计算出的目标
+                                Text {
+                                    text: "计算目标:"
+                                    font.pixelSize: labelFontSize
+                                    color: theme ? theme.textColor : "black"
+                                }
+                                
+                                RowLayout {
+                                    spacing: 10
+                                    
+                                    Text {
+                                        id: calculatedYearlyGoalText
+                                        text: "¥2000.00"
+                                        font.bold: true
+                                        color: profitColor
+                                        font.pixelSize: inputFontSize
+                                    }
+                                    
+                                    CustomButton {
+                                        text: "应用"
+                                        implicitWidth: 70
+                                        implicitHeight: inputHeight
+                                        highlighted: true
+                                        
+                                        onClicked: {
+                                            var goalValue = parseFloat(calculatedYearlyGoalText.text.replace("¥", ""));
+                                            yearlyGoalInput.text = goalValue.toFixed(2);
+                                            if (backend) {
+                                                backend.setAnnualGoal(goalValue);
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                // 说明文本 - 跨两列
+                                Text {
+                                    Layout.columnSpan: 2
                                     Layout.fillWidth: true
-                                    spacing: 8
+                                    text: "复利模式下,根据您的初始投资和期望年收益率计算目标金额。"
+                                    font.pixelSize: 12
+                                    color: Qt.darker(textColor, 1.2)
+                                    wrapMode: Text.WordWrap
+                                }
+                            }
+                                
+                            // 当前进度
+                            Text {
+                                text: "当前进度:"
+                                font.pixelSize: labelFontSize
+                                color: theme ? theme.textColor : "black"
+                                visible: yearlyGoalSwitch.checked
+                            }
+                                
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 8
+                                visible: yearlyGoalSwitch.checked
+                                
+                                // 进度文字
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 5
                                     
-                                    // 进度文字
-                                        RowLayout {
-                                        Layout.fillWidth: true
-                                            spacing: 5
-                                            
-                                        Text {
-                                            id: currentYearProfitText
-                                            text: "¥" + ((backend ? backend.getCurrentYearProfit() : 0) || 0).toFixed(2)
-                                            font.pixelSize: labelFontSize
-                                            font.bold: true
-                                            color: (currentYearProfitText.text.indexOf("-") === -1) ? profitColor : lossColor
-                                            }
-                                            
-                                            Text {
-                                            text: " / ¥" + yearlyGoalInput.text
-                                            font.pixelSize: labelFontSize
-                                            color: theme ? theme.textColor : "black"
-                                        }
-                                        
-                                        Item { Layout.fillWidth: true }
-                                        
-                                        Text {
-                                            text: currentYearProgressText.text + "%"
-                                            font.pixelSize: labelFontSize
-                                            font.bold: true
-                                            color: (currentYearProfitText.text.indexOf("-") === -1) ? profitColor : lossColor
-                                        }
-                                        
-                                        Text {
-                                            id: currentYearProgressText
-                                            visible: false // 仅用于计算
-                                            text: {
-                                                try {
-                                                    const profit = parseFloat(currentYearProfitText.text.replace("¥", ""));
-                                                    const goal = parseFloat(yearlyGoalInput.text);
-                                                    if (goal <= 0) return "0";
-                                                    return Math.min(100, Math.max(0, profit / goal * 100)).toFixed(0);
-                                                } catch (e) {
-                                                    return "0";
-                                                }
+                                    Text {
+                                        id: currentYearProfitText
+                                        text: "¥" + ((backend ? backend.getCurrentYearProfit() : 0) || 0).toFixed(2)
+                                        font.pixelSize: labelFontSize
+                                        font.bold: true
+                                        color: (currentYearProfitText.text.indexOf("-") === -1) ? profitColor : lossColor
+                                    }
+                                    
+                                    Text {
+                                        text: " / ¥" + yearlyGoalInput.text
+                                        font.pixelSize: labelFontSize
+                                        color: theme ? theme.textColor : "black"
+                                    }
+                                
+                                    Item { Layout.fillWidth: true }
+                                
+                                    Text {
+                                        text: currentYearProgressText.text + "%"
+                                        font.pixelSize: labelFontSize
+                                        font.bold: true
+                                        color: (currentYearProfitText.text.indexOf("-") === -1) ? profitColor : lossColor
+                                    }
+                                    
+                                    Text {
+                                        id: currentYearProgressText
+                                        visible: false // 仅用于计算
+                                        text: {
+                                            try {
+                                                const profit = parseFloat(currentYearProfitText.text.replace("¥", ""));
+                                                const goal = parseFloat(yearlyGoalInput.text);
+                                                if (goal <= 0) return "0";
+                                                return Math.min(100, Math.max(0, profit / goal * 100)).toFixed(0);
+                                            } catch (e) {
+                                                return "0";
                                             }
                                         }
                                     }
+                                }
+                                
+                                // 进度条
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    height: 8
+                                    radius: 4
+                                    color: theme ? (theme.isDarkTheme ? Qt.rgba(0.2, 0.2, 0.25, 0.7) : Qt.rgba(0.9, 0.9, 0.9, 1.0)) : "#f0f0f0"
                                     
-                                    // 进度条
                                     Rectangle {
-                                        Layout.fillWidth: true
-                                        height: 8
+                                        width: Math.max(0, Math.min(parent.width, parent.width * parseInt(currentYearProgressText.text) / 100))
+                                        height: parent.height
                                         radius: 4
-                                        color: theme ? (theme.isDarkTheme ? Qt.rgba(0.2, 0.2, 0.25, 0.7) : Qt.rgba(0.9, 0.9, 0.9, 1.0)) : "#f0f0f0"
+                                        color: (currentYearProfitText.text.indexOf("-") === -1) ? profitColor : lossColor
                                         
-                                        Rectangle {
-                                            width: Math.max(0, Math.min(parent.width, parent.width * parseInt(currentYearProgressText.text) / 100))
-                                            height: parent.height
-                                            radius: 4
-                                            color: (currentYearProfitText.text.indexOf("-") === -1) ? profitColor : lossColor
-                                            
-                                            Behavior on width {
-                                                NumberAnimation { duration: 600; easing.type: Easing.OutCubic }
-                                            }
+                                        Behavior on width {
+                                            NumberAnimation { duration: 600; easing.type: Easing.OutCubic }
                                         }
                                     }
+                                }
+                            }
+                            
+                            // 添加年度复利计算函数
+                            function recalculateAnnualCompoundGoal() {
+                                try {
+                                    var initialInvestment = parseFloat(yearlyInitialInvestmentInput.text) || 10000.0;
+                                    var yearlyRate = yearlyRateSpinBox.value / 100.0;
+                                    
+                                    // 计算年度目标 = 初始投资 * 年收益率
+                                    var calculatedGoal = initialInvestment * yearlyRate;
+                                    calculatedYearlyGoalText.text = "¥" + calculatedGoal.toFixed(2);
+                                } catch (e) {
+                                    console.error("计算年度复利目标失败: " + e);
                                 }
                             }
                         }
@@ -2421,6 +2857,46 @@ Item {
                     var scrollableHeight = flickableArea.contentHeight - flickableArea.height;
                     flickableArea.contentY = Math.max(0, Math.min(scrollableHeight, newContentY));
                     wheel.accepted = true;
+                }
+            }
+        }
+
+        // 添加Toast通知组件
+        Toast {
+            id: settingsToast
+        }
+        
+        // 添加回到顶部按钮
+        Rectangle {
+            id: backToTopButton
+            width: 50
+            height: 50
+            radius: width/2
+            color: theme ? theme.primaryColor : "#3498db"
+            opacity: flickableArea.contentY > 500 ? 1.0 : 0.0 // 当滚动超过500时显示
+            visible: opacity > 0
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            anchors.rightMargin: 20
+            anchors.bottomMargin: 20
+            z: 100
+            
+            Behavior on opacity {
+                NumberAnimation { duration: 200 }
+            }
+            
+            Text {
+                anchors.centerIn: parent
+                text: "↑"
+                color: "white"
+                font.pixelSize: 24
+                font.bold: true
+            }
+            
+            MouseArea {
+                anchors.fill: parent
+                onClicked: {
+                    flickableArea.contentY = 0;
                 }
             }
         }

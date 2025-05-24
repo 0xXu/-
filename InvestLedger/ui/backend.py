@@ -29,6 +29,7 @@ class UIBackend(QObject):
     errorOccurred = Signal(str)  # 发生错误
     messageReceived = Signal(str)  # 显示消息
     importPreviewReady = Signal(str)  # 导入预览数据JSON字符串
+    dashboardUpdateNeeded = Signal()  # 通知仪表盘需要更新
     
     def __init__(self, main_app):
         super().__init__()
@@ -1432,3 +1433,13 @@ class UIBackend(QObject):
             version = self.main_app.update_checker.latest_version
             notes = self.main_app.update_checker.release_notes
             self.updateAvailable.emit(version, notes)
+
+    @Slot(result=bool)
+    def refreshDashboard(self):
+        """通知仪表盘更新数据"""
+        try:
+            self.dashboardUpdateNeeded.emit()
+            return True
+        except Exception as e:
+            self.errorOccurred.emit(f"刷新仪表盘失败: {str(e)}")
+            return False

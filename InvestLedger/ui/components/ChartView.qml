@@ -11,23 +11,40 @@ Item {
     // 当ChartView的可见性发生变化时触发
     onVisibleChanged: {
         if (visible) {
-            console.log("ChartView: 视图变为可见，设置加载状态并重载WebView。");
+            console.log("ChartView: 视图变为可见，设置加载状态。");
+            
+            // 停止任何正在进行的操作
+            loadTimer.stop();
+            
+            // 重置状态
             isLoading = true;       // 进入加载状态
             hasError = false;
             errorMessage = "";
 
             loadingIndicator.visible = true; // 显示加载动画
-            chartContainer.visible = false; // 隐藏旧的/空白的图表
+            // 不在这里设置 chartContainer.visible = false，以避免与 chartsRendered 冲突
             emptyView.visible = false;    // 隐藏错误/空状态视图
             
-            webView.reload(); // 重新加载HTML页面
+            if (webViewInitialized) {
+                // 如果WebView已经初始化，无需重新加载，直接触发数据加载
+                console.log("ChartView: WebView已初始化，直接触发数据加载。");
+                loadTimer.restart(); // 使用定时器加载数据，允许UI更新
+            } else {
+                console.log("ChartView: 首次加载，重载WebView。");
+                // 首次加载时，重载WebView (pageLoaded会在WebView加载完成后被调用，然后触发loadChartData)
+                webView.reload(); 
+                webViewInitialized = true;
+            }
         } else {
             console.log("ChartView: 视图变为隐藏。");
             // 如果有活动的定时器或操作，可以在这里停止它们
             loadTimer.stop();
-            // isLoading = false; // 可选：如果需要在隐藏时重置加载状态
+            // 注意：即使隐藏视图，我们也不重置图表状态，这样在再次显示时可以快速显示旧数据
         }
     }
+    
+    // 控制WebView初始化状态的标志
+    property bool webViewInitialized: false
     
     property int reportedHtmlHeight: 600 // Default initial height
     
@@ -40,14 +57,10 @@ Item {
     function pageLoaded() {
         console.log("ChartView QML: pageLoaded() 被JS调用，表明WebView和WebChannel已就绪。");
         // WebView已加载，WebChannel已准备好，现在可以安全地启动数据加载流程
-        // isLoading 应该已经被 onVisibleChanged 设置为 true
-        if (isLoading) { // 确认我们处于加载流程中
+        if (visible && isLoading) { // 只在视图可见且处于加载状态时触发加载
             loadTimer.restart(); // 触发 loadChartData
         } else {
-            // 这不应该发生，如果发生了，说明 onVisibleChanged->reload->pageLoaded 流程有问题
-            console.warn("ChartView QML: pageLoaded() 被调用，但isLoading为false。可能存在逻辑问题。");
-            // 也可以选择在这里强制启动加载，以防万一
-            // startLoading(); // startLoading会再次设置isLoading等，可能不是最优
+            console.log("ChartView QML: pageLoaded() 被调用，但视图不可见或不在加载状态。等待视图变为可见。");
         }
     }
     
@@ -57,6 +70,31 @@ Item {
         if (reportedHtmlHeight !== newHeight && newHeight > 0) {
             reportedHtmlHeight = newHeight;
         }
+    }
+    
+    // NEW function: Called by JavaScript after Plotly charts are fully rendered
+    function chartsRendered() {
+        console.log("ChartView QML: chartsRendered() called from JS. Charts should be ready.");
+        
+        // 先将状态设为非加载中
+        isLoading = false;
+        loadingIndicator.visible = false;
+        
+        // 设置图表容器为可见 (确保在状态变更后执行)
+        chartContainer.visible = true;
+        
+        console.log("ChartView QML: 设置 chartContainer.visible = true");
+        // 使用定时器在下一帧再次确认可见状态
+        Qt.callLater(function() {
+            if (!chartContainer.visible) {
+                console.log("ChartView QML: 警告! chartContainer仍然不可见，强制设置为可见");
+                chartContainer.visible = true;
+            }
+            console.log("ChartView QML: chartContainer visible:", chartContainer.visible, 
+                       "width:", chartContainer.width, "height:", chartContainer.height);
+            console.log("ChartView QML: webView width:", webView.width, 
+                       "height:", webView.height, "url:", webView.url);
+        });
     }
     
     // 初始化
@@ -81,11 +119,18 @@ Item {
             
             // 显示加载指示器
             loadingIndicator.visible = true
-            chartContainer.visible = false
+            // 不在这里设置 chartContainer.visible = false，以避免与 chartsRendered 冲突
             emptyView.visible = false
             
-            // 延迟执行加载操作，允许UI更新
-            loadTimer.restart()
+            // 如果WebView已初始化，直接加载数据；否则，WebView的onLoadingChanged会触发pageLoaded
+            if (webViewInitialized) {
+                // 延迟执行加载操作，允许UI更新
+                loadTimer.restart()
+            } else {
+                // 首次加载时，重载WebView
+                webView.reload()
+                webViewInitialized = true
+            }
         } catch (e) {
             console.error("ChartView: 启动加载过程出错:", e)
             setError("启动加载过程出错: " + e)
@@ -116,18 +161,26 @@ Item {
                 winLossRatio: loadWinLossRatioData()
             }
             
+            // 检查是否有数据
+            if (!chartData.profitLoss.months || chartData.profitLoss.months.length === 0) {
+                console.log("ChartView: 图表数据为空");
+                setError("没有可用的数据来生成图表。请添加一些交易记录后再试。");
+                return;
+            }
+            
             // 将数据转换为JSON字符串
             var dataJson = JSON.stringify(chartData)
             
             // 使用 WebEngine 的 runJavaScript 方法
-            var js = "if (typeof updateCharts === 'function') { updateCharts(" + dataJson + "); console.log('图表更新函数已调用'); } else { console.error('updateCharts 函数未找到'); }";
+            // updateCharts 函数现在应该在它完成绘图后调用 chartView.chartsRendered()
+            var js = "if (typeof updateCharts === 'function') { updateCharts(" + dataJson + "); console.log('图表更新函数命令已发送'); } else { console.error('updateCharts 函数未找到'); }";
             
             webView.runJavaScript(js, function(result) {
-                console.log("图表更新结果:", result);
-                // 在JavaScript执行完成后显示图表
-            chartContainer.visible = true
-            isLoading = false
-            loadingIndicator.visible = false
+                console.log("JS snippet for updateCharts executed, result (if any):", result);
+                // Actual chart visibility and loading state are now handled by chartsRendered()
+                // when called back from JavaScript after Plotly rendering.
+                // If 'result' contains an error message, it might indicate an immediate problem
+                // with the JS snippet itself, though async errors in updateCharts won't show here.
             });
             
         } catch (e) {
@@ -363,8 +416,14 @@ Item {
         isLoading = false
         
         loadingIndicator.visible = false
-        chartContainer.visible = false
-        emptyView.visible = true
+        // 只在必要时隐藏图表容器，如果已经有图表数据则不隐藏
+        if (message.includes("没有可用的数据") || !chartContainer.visible) {
+            chartContainer.visible = false
+            emptyView.visible = true
+        } else {
+            // 如果是其他错误，但图表已经显示，则保留图表但也显示错误视图
+            emptyView.visible = true
+        }
     }
     
     // 主布局
@@ -398,7 +457,7 @@ Item {
                     width: parent.width
                     height: chartView.reportedHtmlHeight // Bind to the reported height
                     color: "white"
-                visible: !isLoading && !hasError
+                    visible: false // 初始设置为不可见，由chartsRendered函数控制
                     radius: 4
                     
                     // WebChannel设置

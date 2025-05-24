@@ -187,205 +187,293 @@
                 if (!data) {
                     console.error("接收到的数据格式无效:", data);
                     reportContentHeight(); // Report height even if data is invalid (e.g. for empty state)
+                    // 通知 QML (可选，如果需要处理这种情况)
+                    if (chartView && typeof chartView.chartsRendered === 'function') {
+                        chartView.chartsRendered(); // 即使没有数据，也要通知QML渲染流程完成
+                    }
                     return false;
                 }
                 
                 const promises = [];
                 // 更新盈亏趋势图
                 if (data.profitLoss) {
+                    console.log("JS: 更新盈亏趋势图，数据月份:", data.profitLoss.months ? data.profitLoss.months.length : 0, "项");
                     promises.push(updateProfitLossChart(data.profitLoss));
                 }
                 
                 // 更新个股盈亏排名图
                 if (data.stockRanking) {
+                    console.log("JS: 更新个股盈亏排名图，数据:", data.stockRanking.stocks ? data.stockRanking.stocks.length : 0, "项");
                     promises.push(updateStockRankingChart(data.stockRanking));
                 }
                 
                 // 更新月度交易量图
                 if (data.monthlyVolume) {
+                    console.log("JS: 更新月度交易量图，数据月份:", data.monthlyVolume.months ? data.monthlyVolume.months.length : 0, "项");
                     promises.push(updateMonthlyVolumeChart(data.monthlyVolume));
                 }
                 
                 // 更新盈亏比率趋势图
                 if (data.winLossRatio) {
+                    console.log("JS: 更新盈亏比率趋势图，数据月份:", data.winLossRatio.months ? data.winLossRatio.months.length : 0, "项");
                     promises.push(updateWinLossRatioChart(data.winLossRatio));
                 }
 
                 if (promises.length > 0) {
+                    console.log("JS: 等待所有图表更新完成...");
                     await Promise.all(promises);
                     console.log("JS: All charts updated via Plotly.react promises.");
                 } else {
                     console.log("JS: No chart data provided to update.");
                 }
                 
-                reportContentHeight(); // Report height after all are done
+                // 报告内容高度
+                reportContentHeight(); // 确保在调用QML前高度已报告
+                console.log("JS: 内容高度已报告，现在通知QML图表渲染完成");
+
+                // 确认在DOM中有图表元素
+                const chartElements = document.querySelectorAll('.chart');
+                console.log("JS: 页面中有", chartElements.length, "个图表元素");
+                
+                // 通知 QML 图表已渲染完成
+                if (chartView && typeof chartView.chartsRendered === 'function') {
+                    chartView.chartsRendered();
+                    console.log("JS: Called QML chartView.chartsRendered()");
+                } else {
+                    console.error("JS: QML object 'chartView' not found or chartsRendered is not a function. Cannot notify QML completion.");
+                }
 
                 return true;
             } catch (e) {
                 console.error("更新图表时出错:", e);
-                reportContentHeight(); // Also report height on error
+                reportContentHeight(); // 即使出错，也尝试报告高度
+                
+                // 通知 QML 出错
+                if (chartView && typeof chartView.chartsRendered === 'function') {
+                    // 即使有错误，也调用chartsRendered以解除加载状态
+                    chartView.chartsRendered();
+                    console.log("JS: Called QML chartsRendered() despite error to unblock UI");
+                }
                 return false;
             }
         }
         
         // 更新盈亏趋势图
         function updateProfitLossChart(data) {
-            // 盈利柱状图
-            var profitTrace = {
-                x: data.months,
-                y: data.profits,
-                name: '盈利',
-                type: 'bar',
-                marker: {
-                    color: '#2ecc71'
+            try {
+                console.log("JS updateProfitLossChart: 接收数据:", JSON.stringify(data));
+                
+                // 检查数据有效性
+                if (!data || !data.months || data.months.length === 0) {
+                    console.error("JS updateProfitLossChart: 无效的数据格式");
+                    return Plotly.react('profit-loss-chart', [], {});
                 }
-            };
-            
-            // 亏损柱状图
-            var lossTrace = {
-                x: data.months,
-                y: data.losses,
-                name: '亏损',
-                type: 'bar',
-                marker: {
-                    color: '#e74c3c'
-                }
-            };
-            
-            // 净值折线图
-            var netTrace = {
-                x: data.months,
-                y: data.netValues,
-                name: '净值',
-                type: 'scatter',
-                mode: 'lines+markers',
-                line: {
-                    color: '#3498db',
-                    width: 3
-                },
-                marker: {
-                    size: 8
-                }
-            };
-            
-            var layout = {
-                title: '',
-                barmode: 'group',
-                yaxis: {title: '金额'},
-                legend: {orientation: 'h', y: -0.2},
-                margin: {l: 50, r: 50, t: 30, b: 80},
-                plot_bgcolor: '#fff',
-                paper_bgcolor: '#fff'
-            };
-            
-            return Plotly.react('profit-loss-chart', [profitTrace, lossTrace, netTrace], layout); // Return promise
+                
+                // 盈利柱状图
+                var profitTrace = {
+                    x: data.months,
+                    y: data.profits,
+                    name: '盈利',
+                    type: 'bar',
+                    marker: {
+                        color: '#2ecc71'
+                    }
+                };
+                
+                // 亏损柱状图
+                var lossTrace = {
+                    x: data.months,
+                    y: data.losses,
+                    name: '亏损',
+                    type: 'bar',
+                    marker: {
+                        color: '#e74c3c'
+                    }
+                };
+                
+                // 净值折线图
+                var netTrace = {
+                    x: data.months,
+                    y: data.netValues,
+                    name: '净值',
+                    type: 'scatter',
+                    mode: 'lines+markers',
+                    line: {
+                        color: '#3498db',
+                        width: 3
+                    },
+                    marker: {
+                        size: 8
+                    }
+                };
+                
+                var layout = {
+                    title: '',
+                    barmode: 'group',
+                    yaxis: {title: '金额'},
+                    legend: {orientation: 'h', y: -0.2},
+                    margin: {l: 50, r: 50, t: 30, b: 80},
+                    plot_bgcolor: '#fff',
+                    paper_bgcolor: '#fff'
+                };
+                
+                var traces = [profitTrace, lossTrace, netTrace];
+                console.log("JS updateProfitLossChart: Plotly.react准备绘制图表，数据点数:", traces[0].x.length);
+                return Plotly.react('profit-loss-chart', traces, layout); // Return promise
+            } catch (e) {
+                console.error("JS updateProfitLossChart 错误:", e);
+                return Promise.resolve(); // 返回一个已解决的Promise，以避免中断其他图表的更新
+            }
         }
         
         // 更新个股盈亏排名图
         function updateStockRankingChart(data) {
-            var colors = data.values.map(function(value) {
-                return value >= 0 ? '#2ecc71' : '#e74c3c';
-            });
-            
-            var trace = {
-                x: data.stocks,
-                y: data.values,
-                type: 'bar',
-                marker: {
-                    color: colors
+            try {
+                console.log("JS updateStockRankingChart: 接收数据:", JSON.stringify(data));
+                
+                // 检查数据有效性
+                if (!data || !data.stocks || data.stocks.length === 0) {
+                    console.error("JS updateStockRankingChart: 无效的数据格式");
+                    return Plotly.react('stock-ranking-chart', [], {});
                 }
-            };
-            
-            var layout = {
-                title: '',
-                yaxis: {title: '盈亏金额'},
-                margin: {l: 60, r: 30, t: 30, b: 100},
-                plot_bgcolor: '#fff',
-                paper_bgcolor: '#fff',
-                xaxis: {
-                    tickangle: -45
-                }
-            };
-            
-            return Plotly.react('stock-ranking-chart', [trace], layout); // Return promise
+                
+                var colors = data.values.map(function(value) {
+                    return value >= 0 ? '#2ecc71' : '#e74c3c';
+                });
+                
+                var trace = {
+                    x: data.stocks,
+                    y: data.values,
+                    type: 'bar',
+                    marker: {
+                        color: colors
+                    }
+                };
+                
+                var layout = {
+                    title: '',
+                    yaxis: {title: '盈亏金额'},
+                    margin: {l: 60, r: 30, t: 30, b: 100},
+                    plot_bgcolor: '#fff',
+                    paper_bgcolor: '#fff',
+                    xaxis: {
+                        tickangle: -45
+                    }
+                };
+                
+                console.log("JS updateStockRankingChart: Plotly.react准备绘制图表，数据点数:", trace.x.length);
+                return Plotly.react('stock-ranking-chart', [trace], layout); // Return promise
+            } catch (e) {
+                console.error("JS updateStockRankingChart 错误:", e);
+                return Promise.resolve(); // 返回一个已解决的Promise，以避免中断其他图表的更新
+            }
         }
         
         // 更新月度交易量图
         function updateMonthlyVolumeChart(data) {
-            var trace = {
-                x: data.months,
-                y: data.volumes,
-                type: 'bar',
-                marker: {
-                    color: '#3498db'
+            try {
+                console.log("JS updateMonthlyVolumeChart: 接收数据:", JSON.stringify(data));
+                
+                // 检查数据有效性
+                if (!data || !data.months || data.months.length === 0) {
+                    console.error("JS updateMonthlyVolumeChart: 无效的数据格式");
+                    return Plotly.react('monthly-volume-chart', [], {});
                 }
-            };
-            
-            var layout = {
-                title: '',
-                yaxis: {title: '交易量'},
-                xaxis: {title: '月份'},
-                margin: {l: 50, r: 30, t: 30, b: 50},
-                plot_bgcolor: '#fff',
-                paper_bgcolor: '#fff'
-            };
-            
-            return Plotly.react('monthly-volume-chart', [trace], layout); // Return promise
+                
+                var trace = {
+                    x: data.months,
+                    y: data.volumes,
+                    type: 'bar',
+                    marker: {
+                        color: '#3498db'
+                    }
+                };
+                
+                var layout = {
+                    title: '',
+                    yaxis: {title: '交易量'},
+                    xaxis: {title: '月份'},
+                    margin: {l: 50, r: 30, t: 30, b: 50},
+                    plot_bgcolor: '#fff',
+                    paper_bgcolor: '#fff'
+                };
+                
+                console.log("JS updateMonthlyVolumeChart: Plotly.react准备绘制图表，数据点数:", trace.x.length);
+                return Plotly.react('monthly-volume-chart', [trace], layout); // Return promise
+            } catch (e) {
+                console.error("JS updateMonthlyVolumeChart 错误:", e);
+                return Promise.resolve(); // 返回一个已解决的Promise，以避免中断其他图表的更新
+            }
         }
         
         // 更新盈亏比率趋势图
         function updateWinLossRatioChart(data) {
-            var winRateTrace = {
-                x: data.months,
-                y: data.winRates,
-                name: '胜率',
-                type: 'scatter',
-                mode: 'lines+markers',
-                line: {
-                    color: '#2ecc71',
-                    width: 3
-                },
-                marker: {
-                    size: 8
+            try {
+                console.log("JS updateWinLossRatioChart: 接收数据:", JSON.stringify(data));
+                
+                // 检查数据有效性
+                if (!data || !data.months || data.months.length === 0) {
+                    console.error("JS updateWinLossRatioChart: 无效的数据格式");
+                    return Plotly.react('win-loss-ratio-chart', [], {});
                 }
-            };
-            
-            var profitLossRatioTrace = {
-                x: data.months,
-                y: data.profitLossRatios,
-                name: '盈亏比',
-                type: 'scatter',
-                mode: 'lines+markers',
-                line: {
-                    color: '#3498db',
-                    width: 3
-                },
-                marker: {
-                    size: 8
-                },
-                yaxis: 'y2'
-            };
-            
-            var layout = {
-                title: '',
-                yaxis: {
-                    title: '胜率 (%)',
-                    rangemode: 'tozero'
-                },
-                yaxis2: {
-                    title: '盈亏比',
-                    overlaying: 'y',
-                    side: 'right',
-                    rangemode: 'tozero'
-                },
-                xaxis: {title: '月份'},
-                legend: {orientation: 'h', y: -0.2},
-                margin: {l: 50, r: 50, t: 30, b: 80},
-                plot_bgcolor: '#fff',
-                paper_bgcolor: '#fff'
-            };
-            
-            return Plotly.react('win-loss-ratio-chart', [winRateTrace, profitLossRatioTrace], layout); // Return promise
+                
+                var winRateTrace = {
+                    x: data.months,
+                    y: data.winRates,
+                    name: '胜率',
+                    type: 'scatter',
+                    mode: 'lines+markers',
+                    line: {
+                        color: '#2ecc71',
+                        width: 3
+                    },
+                    marker: {
+                        size: 8
+                    }
+                };
+                
+                var profitLossRatioTrace = {
+                    x: data.months,
+                    y: data.profitLossRatios,
+                    name: '盈亏比',
+                    type: 'scatter',
+                    mode: 'lines+markers',
+                    line: {
+                        color: '#3498db',
+                        width: 3
+                    },
+                    marker: {
+                        size: 8
+                    },
+                    yaxis: 'y2'
+                };
+                
+                var layout = {
+                    title: '',
+                    yaxis: {
+                        title: '胜率 (%)',
+                        rangemode: 'tozero'
+                    },
+                    yaxis2: {
+                        title: '盈亏比',
+                        overlaying: 'y',
+                        side: 'right',
+                        rangemode: 'tozero'
+                    },
+                    xaxis: {title: '月份'},
+                    legend: {orientation: 'h', y: -0.2},
+                    margin: {l: 50, r: 50, t: 30, b: 80},
+                    plot_bgcolor: '#fff',
+                    paper_bgcolor: '#fff'
+                };
+                
+                var traces = [winRateTrace, profitLossRatioTrace];
+                console.log("JS updateWinLossRatioChart: Plotly.react准备绘制图表，数据点数:", traces[0].x.length);
+                return Plotly.react('win-loss-ratio-chart', traces, layout); // Return promise
+            } catch (e) {
+                console.error("JS updateWinLossRatioChart 错误:", e);
+                return Promise.resolve(); // 返回一个已解决的Promise，以避免中断其他图表的更新
+            }
         }
         
         // 用于测试的函数
